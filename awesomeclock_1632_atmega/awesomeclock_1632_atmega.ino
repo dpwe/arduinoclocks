@@ -6,25 +6,19 @@
 // This version is setup to use a regular Arduino (not an ATTiny).
 
 // Wiring for 16x24 LED matrix connected to ATMEGA328P board 
-// Board: "Adafruit Trinket (ATtiny85 @ 8MHz)", "Upload Using Programmer"
+// (Adafruit Boarduino + FTDI cable; Program as "Duemillenova with 328P")
+#define DATA 3  // Orange
+#define CS   5  // White
+#define WR   4  // Yellow
 
-// See https://learn.adafruit.com/16x24-led-matrix/wiring
-// Pin 0 is I2C DAT
-#define CS   1  // White
-// Pin 2 is I2C CLK
-#define WR   3  // Yellow
-#define DATA 4  // Orange
-//#define CS2  5
-
-// DS3231 I2C
-// SDA -> D0  (Blue)
-// SCL -> D2  (Yellow)
-// SQWV not connected because we're out of pins.
+// Chronodot I2C
+// SDA -> A4  (Blue)
+// SCL -> A5  (Yellow)
+// SQWV -> D2 (Green; not actually used in this script because ATTiny can't use it.)
 
 #define HT1632_NUMBERS_ONLY  // Actually have to set directly in HT1632.cpp.
 #include "HT1632.h"
-
-// single matrix
+// Single matrix
 HT1632LEDMatrix matrix = HT1632LEDMatrix(DATA, WR, CS);
 
 // ---------------------------------

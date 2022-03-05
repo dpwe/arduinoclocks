@@ -74,12 +74,14 @@ class HT1632LEDMatrix : public Print {
   void setPixel(uint8_t x, uint8_t y);
   void drawPixel(uint8_t x, uint8_t y, uint8_t color);
 
+#ifdef GRAPHICS
   void drawLine(int8_t x0, int8_t y0, int8_t x1, int8_t y1, uint8_t color);
   void drawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color);
   void fillRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color);
   void drawCircle(uint8_t x0, uint8_t y0, uint8_t r, uint8_t color);
   void fillCircle(uint8_t x0, uint8_t y0, uint8_t r, uint8_t color);
-
+#endif // GRAPHICS
+  
   // Printing
   void setCursor(uint8_t x, uint8_t y);
   void setTextSize(uint8_t s);

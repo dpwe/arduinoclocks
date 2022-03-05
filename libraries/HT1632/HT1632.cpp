@@ -1,5 +1,12 @@
 #include "HT1632.h"
+
+#define HT1632_NUMBERS_ONLY
+
+#ifdef HT1632_NUMBERS_ONLY
+#include "glcd_font_numbers.c"
+#else
 #include "glcdfont.c"
+#endif
 //#include "tomthumbfont.c"
 
 #define swap(a, b) { uint16_t t = a; a = b; b = t; }
@@ -137,6 +144,7 @@ void HT1632LEDMatrix::writeScreen() {
   }
 }
 
+#ifdef GRAPHICS
 // bresenham's algorithm - thx wikpedia
 void HT1632LEDMatrix::drawLine(int8_t x0, int8_t y0, int8_t x1, int8_t y1, 
 		      uint8_t color) {
@@ -263,6 +271,7 @@ void HT1632LEDMatrix::fillCircle(uint8_t x0, uint8_t y0, uint8_t r, uint8_t colo
     drawLine(x0-y, y0-x, x0-y, y0+x+1, color);
   }
 }
+#endif // GRAPHICS
 
 void HT1632LEDMatrix::setCursor(uint8_t x, uint8_t y) {
   cursor_x = x; 
@@ -329,7 +338,9 @@ void HT1632LEDMatrix::drawCharRows(uint8_t x, uint8_t y, char c,
           if (size == 1) // default size
             drawPixel(x+i, y+j, color);
           else {  // big size
-            fillRect(x+i*size, y+j*size, size, size, color);
+#ifdef GRAPHICS
+			  fillRect(x+i*size, y+j*size, size, size, color);
+#endif // GRAPHICS
           }
         } 
       }
@@ -424,6 +435,7 @@ void HT1632::clrPixel(uint16_t i) {
 }
 
 void HT1632::dumpScreen() {
+#ifdef ENABLE_DUMP_SCREEN
   Serial.println("---------------------------------------");
 
   for (uint16_t i=0; i<(WIDTH*HEIGHT/8); i++) {
@@ -434,6 +446,7 @@ void HT1632::dumpScreen() {
   }
 
   Serial.println("\n---------------------------------------");
+#endif // ARDUINO_AVR_TRINKET5
 }
 
 void HT1632::writeScreen() {
