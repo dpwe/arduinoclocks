@@ -1,11 +1,32 @@
 /*
- *  glcd_clock based on openGLCD Library - Hello World
- * 
+ *  glcd_clock (based on openGLCD Library)
+ *  
+ *  ks0108 128x64 LCD dot-matrix display is connected on *a lot* of pins, 
+ *  as specified in PinConfig_ks0108-Uno.h.
+ *  
+ *  This differs from the default openglcd because:
+ *   - The data pins are in order (LCD D0 = Arduino D4 .. LCD D7 = Arduin D11) rather than nybble-swapped.
+ *   - LCD E is moved to D12, freeing D3 ..
+ *   - Backlight is on D3, which is PWM enabled
+ *   
+ *   For the clock RTC...
+ *    - DS3231 SDA on A4
+ *    - DS3231 SCL on A5
+ *    - DS3231 SQWV on D2 (interrupt-enabled).
  */
 
-#include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
+typedef unsigned long time_t;
+#include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
+#include "RTClib.h"
 
-const int sqwPin = 2; // The number of the pin for monitor alarm status on DS3231
+// no font headers have to be included
+#include <openGLCD.h>
+
+// --------------------
+// 1PPS interrupt
+// --------------------
+
+const int sqwPin = 2; // The number of the pin for DS3231 1PPS SQWV output
 
 volatile unsigned long rtc_micros = 0;
 volatile bool pending_RTC_interrupt = false;
@@ -23,29 +44,16 @@ void setup_interrupts() {
   attachInterrupt(digitalPinToInterrupt(sqwPin), rtc_mark_isr, FALLING);
 } 
 
-
 // ======================================================
 // Track RTC times.
 // ======================================================
-#include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
-#include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
-
 #include <Timezone.h>       // https://github.com/JChristensen/Timezone
 // US Eastern Time Zone (New York, Detroit)
 TimeChangeRule myDST = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
 TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
 Timezone myTZ(myDST, mySTD);
 
-#include "RTClib.h"
 RTC_DS3231 rtc;
-
-unsigned long last_rtc_micros = 0;
-
-void sync_time_from_RTC(void) {
-  // This is called soon after an A0 transition is detected, so RTC unixtime is still current.
-  //rtc_clock.sync(rtc.now().unixtime(), rtc_micros);
-  last_rtc_micros = rtc_micros;
-}
 
 time_t now_local(void) {
   // Like now(), but includes timezone modification.
@@ -64,77 +72,11 @@ void setup_RTC(void) {
   Serial.println("RTC OK");
 }
 
-void update_RTC(void) {
-  if (pending_RTC_interrupt) {
-    sync_time_from_RTC();
-    pending_RTC_interrupt = false;
-    Serial.println("RTC IRQ");
-  }
-}
-
-time_t RTC_utc_get(void) {
-  return rtc.now().unixtime();
-}
-
-
-void printDigits(int digits)
-{
-  // utility function for digital clock display: prints preceding colon and leading 0
-  if(digits < 10)
-    Serial.print('0');
-  Serial.print(digits);
-}
-
-void serial_print_tm(const tmElements_t &tm)
-{
-  Serial.print(1970 + tm.Year);
-  Serial.print("-");
-  printDigits(tm.Month);
-  Serial.print("-");
-  printDigits(tm.Day);
-  Serial.print(" ");
-  printDigits(tm.Hour);
-  Serial.print(":");
-  printDigits(tm.Minute);
-  Serial.print(":");
-  printDigits(tm.Second);
-  Serial.println();
-}
-
-
-void RTC_setup(void) {
-  // Have the now() function return UTC.
-  setSyncProvider(RTC_utc_get);   // the function to get the time from the RTC
-  if(timeStatus() != timeSet)
-     Serial.println("Unable to sync with the RTC");
-  else {
-     Serial.println("RTC has set the system time");
-     tmElements_t tm;
-     breakTime(now_local(), tm);
-     serial_print_tm(tm);
-  }
-}
-
 //------------------------
 // Display
 //------------------------
 
-// include the library header
-// no font headers have to be included
-#include <openGLCD.h>
-
-uint8_t last_day = 0;
-
-void setup()
-{
-  Wire.begin();
-  Serial.begin(9600);
-  Serial.println("glcd_clock");
-
-  setup_RTC();
-  RTC_setup();
-  setup_interrupts();
-  
+void setup_display(void) {
   // Initialize the GLCD 
   GLCD.Init();
 
@@ -147,28 +89,16 @@ void setup()
   //GLCD.SelectFont(Arial_bold_14);
   //GLCD.SelectFont(TimesNewRoman16_bold);
   //GLCD.SelectFont(CalBlk36);
-  
-
-//  GLCD.print(F("hello, world!")); // keep string in flash on AVR boards with IDE 1.x
-//  GLCD.Puts(F("hello, world!")); // Puts() supports F() with any version of IDE
-
-  // print() below uses RAM on AVR boards but works
-  // on any version of IDE with any processor
-  // note: Same is true for Puts()
-  //GLCD.print("hello, world!"); 
 }
 
 const char *fmt = "hh mm ";
-
 uint8_t colon_visible = true;
+uint8_t last_day = 0;
 
-void loop()
-{
-  if (pending_RTC_interrupt) {
-    pending_RTC_interrupt = false;
-    time_t now_now = now_local();
-    DateTime dt(now_now);
-    if (dt.day() != last_day) {
+void update_display(const DateTime& dt) {
+
+   // Day/Date at top.
+   if (dt.day() != last_day) {
       last_day = dt.day();
       GLCD.SelectFont(System5x7);
       GLCD.CursorToXY(0, 0);
@@ -177,10 +107,11 @@ void loop()
       // Switch font back.
       GLCD.SelectFont(CalBlk36);
     }
+    
+    // Main time digits
     //GLCD.ClearScreen();
     GLCD.CursorToXY(0, 14);
-
-    char buf[20];
+    char buf[8];
     strcpy(buf, fmt);
     GLCD.print(dt.toString(buf));
     if (colon_visible) {
@@ -190,20 +121,106 @@ void loop()
     }
     colon_visible = !colon_visible;
 
-    //  Second progress bar.
+    // Seconds progress bar.
     uint8_t x_scale = 2;
     uint8_t height = 4;
     uint8_t base_y = 58;
     uint8_t base_x = 64 - x_scale * 30;
-    // Bar width goes from 1 to 60 (instead of 0 to 59)
-    uint8_t width_l = x_scale * (1 + second(now_now - 1));
+    // Bar width goes from 1 to 60 (instead of 0 to 59), so we have to work with one second ago.
+    int prev_minute = dt.minute();
+    int prev_second = dt.second() - 1;
+    if (prev_second < 0) {
+      prev_minute = (prev_minute + 59) % 60;
+      prev_second += 60;
+    }
+    uint8_t width_l = x_scale * (1 + prev_second);
     // Draw/undraw transition occurs on second 1.  Second 0 is drawing the 60th tick on the line.
-    if (minute(now_now - 1) & 1) {
+    if (prev_minute & 1) {
       // undraw bar.
       GLCD.FillRect(base_x, base_y, width_l, height, PIXEL_OFF);
     } else {
       // draw bar.
       GLCD.FillRect(base_x, base_y, width_l, height);
     }
+}
+
+// ---------------------------------
+// Backlight
+// ---------------------------------
+
+// Config for backlight day/night mode.
+const int light_low = 32;
+const int light_high = 255;
+const int hour_up = 7;
+const int hour_down = 22;
+
+const int backlightPin = 3;
+
+void setup_backlight(void) {
+  // Backlight
+  pinMode(backlightPin, OUTPUT);  // sets the pin as output
+  analogWrite(backlightPin, light_low);
+}
+
+int target_brightness = 0;
+
+void update_backlight_time(int hour) {
+  target_brightness = light_low;
+  if (hour >= hour_up && hour < hour_down) {
+    target_brightness = light_high;
   }
+}
+
+static inline int8_t sgn(int val) {
+  if (val < 0) return -1;
+  if (val==0) return 0;
+  return 1;
+}
+
+int brightness = 0;
+int brightness_tick = 0;
+const int ticks_per_step = 1;
+
+void update_backlight() {
+  int bright_delta = target_brightness - brightness;
+  if (bright_delta) {
+    if (++brightness_tick >= ticks_per_step) {
+      brightness_tick = 0;
+      brightness += (bright_delta >> 6) + sgn(bright_delta);
+      analogWrite(backlightPin, brightness);
+      //Serial.print("brightness=");
+      //Serial.println(brightness);
+    }
+  }
+}
+
+// -------------------------
+// Main
+// -------------------------
+
+void setup()
+{
+  Wire.begin();
+  Serial.begin(9600);
+  Serial.println("glcd_clock");
+
+  setup_RTC();
+  setup_interrupts();
+  setup_backlight();
+
+  setup_display();
+}
+
+void loop()
+{
+  if (pending_RTC_interrupt) {
+    pending_RTC_interrupt = false;
+    time_t now_now = now_local();
+    DateTime dt(now_now);
+    update_backlight_time(dt.hour());
+    update_display(dt);
+  }
+  // Backlight update is at full-speed, not 1 Hz.
+  update_backlight();
+  delay(10);
 }

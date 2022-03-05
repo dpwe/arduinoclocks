@@ -15,6 +15,7 @@
   * which does the actual arduino pin mappings
   */
 
+
 #if defined(GLCD_CORE_UNO)
 #include "PinConfig_ks0108-Uno.h"	// config file for standard Arduino Uno/2009/nano etc..m328 boards
 #elif defined(GLCD_CORE_MEGA)
@@ -39,6 +40,7 @@
 #ifndef GLCDCFG_FORCE_CORECODE
 #warning using Arduino CoreCode pin config file
 #endif
+#error "corecode"
 #include "PinConfig_ks0108-CoreCode.h"
 #endif
 

@@ -28,16 +28,17 @@
  *     Example: port D bit 3 is 0xD3
  */
 
+
 /* Data pin definitions
  */
-#define glcdPinData0        8
-#define glcdPinData1        9
-#define glcdPinData2        10
-#define glcdPinData3        11
-#define glcdPinData4        4
-#define glcdPinData5        5
-#define glcdPinData6        6
-#define glcdPinData7        7
+#define glcdPinData0        4
+#define glcdPinData1        5
+#define glcdPinData2        6
+#define glcdPinData3        7
+#define glcdPinData4        8
+#define glcdPinData5        9
+#define glcdPinData6        10
+#define glcdPinData7        11
 
 /* Arduino pins used for Control
  * default assignment uses the first five analog pins
@@ -57,10 +58,11 @@
 #define glcdPinRW           A2
 #define glcdPinDI           A3
 //#define glcdPinEN           A4 // (A4 is also I2C SDA)
-#define glcdPinEN           3
+//#define glcdPinEN           3
+#define glcdPinEN           12
 // Reset  - uncomment the next line if glcd module reset is connected to an Arduino pin
 //#define glcdPinRES          A5    // optional s/w Reset control (A5 is also I2C SCL)
 
-//#define glcdPinBL	XX // optional backlight control pin controls BL circuit
+#define glcdPinBL	3 // optional backlight control pin controls BL circuit
 
 #endif //GLCD_PIN_CONFIG_H
