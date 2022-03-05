@@ -44,8 +44,8 @@
  * default assignment uses the first five analog pins
  */
 
-#define glcdPinCSEL1        A0
-#define glcdPinCSEL2        A1
+#define glcdPinCSEL1        12  // CS1 is next to Data7 on connector, so makes connecting a Nano easier
+#define glcdPinCSEL2        A0
 
 #if NBR_CHIP_SELECT_PINS > 2
 #define glcdPinCSEL3         3   // third chip select if needed
@@ -56,10 +56,10 @@
 #endif
 
 #define glcdPinRW           A2
-#define glcdPinDI           A3
+#define glcdPinDI           A1
 //#define glcdPinEN           A4 // (A4 is also I2C SDA)
 //#define glcdPinEN           3
-#define glcdPinEN           12
+#define glcdPinEN           A3   // was 12
 // Reset  - uncomment the next line if glcd module reset is connected to an Arduino pin
 //#define glcdPinRES          A5    // optional s/w Reset control (A5 is also I2C SCL)
 
