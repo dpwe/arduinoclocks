@@ -32,7 +32,7 @@ It didn't work at all the first time I booted it up. Turns out I had connected t
 
 ![glcd_clock in plastic box mount](images/lcd-clock-in-box.jpg)
 
-For completeness/contrast I also built a clock with the ST7920 panel, also with an Arduino Nano, but floating on wires rather than hard-connected to pins.  The DS3231 board sits in a 6 pin header which is superglued to the back of the panel. (This means I can take out the modules to synchronize them).  Then the Nano is held more or less in place via the wires to that header and to the panel pads.
+For completeness/contrast I also built a clock with the ST7920 panel, also with an Arduino Nano, but floating on wires rather than hard-connected to pins.  The DS3231 board sits in a 6 pin header which is superglued to the back of the panel. (This means I can take out the modules to synchronize them).  Then the Nano is held more or less in place via the wires to that header and to the panel pads. Note that because the panel interface takes so many fewer wires, there are lots of unused pins left on the Arduino.
 
 ![Arduino on back of ST7920 panel](images/spi-lcd-panel-back.jpg)
 
