@@ -2,7 +2,7 @@
  *  glcd_clock (based on openGLCD Library)
  *  
  *  ks0108 128x64 LCD dot-matrix display is connected on *a lot* of pins, 
- *  as specified in PinConfig_ks0108-Uno.h.
+ *  as specified in openGLCD/config/ks0108/PinConfig_ks0108-Uno.h.
  *  
  *  This differs from the default openglcd because:
  *   - The data pins are in order (LCD D0 = Arduino D4 .. LCD D7 = Arduin D11) rather than nybble-swapped.
@@ -12,7 +12,7 @@
  *   For the clock RTC...
  *    - DS3231 SDA on A4
  *    - DS3231 SCL on A5
- *    - DS3231 SQWV on D2 (interrupt-enabled).
+ *    - DS3231 SQWV on D2 (interrupt-capable).
  */
 
 typedef unsigned long time_t;
@@ -209,6 +209,9 @@ void setup()
   setup_backlight();
 
   setup_display();
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
 void loop()
@@ -219,6 +222,9 @@ void loop()
     DateTime dt(now_now);
     update_backlight_time(dt.hour());
     update_display(dt);
+    digitalWrite(LED_BUILTIN, HIGH);
+  } else {
+    digitalWrite(LED_BUILTIN, LOW);
   }
   // Backlight update is at full-speed, not 1 Hz.
   update_backlight();

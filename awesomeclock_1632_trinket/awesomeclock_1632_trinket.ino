@@ -93,6 +93,10 @@ Time DS3231::now()
               bcd2bin(buffer[0] & 0x7F));
 }
 
+// ----------------------------------------
+// DST logic
+// ----------------------------------------
+
 int dst_cache_year = -1;
 int dst_start_day = 0;
 int dst_end_day = 0;
@@ -116,15 +120,15 @@ void calc_timechange_days(int year) {
   uint8_t march_first_dow = (6 + 365L * year + ((year + 4) / 4) + 31 + 28) % 7;
   uint8_t second_sunday_date = 14 - ((march_first_dow - 1) % 7);
   dst_start_day = 31 + 28 + ((year % 4) == 0) + second_sunday_date - 1;
-  // March and November are 245 days == 35.0 weeks apart, so 2nd sunday in Nov is the same DOW
-  dst_end_day = dst_start_day + 245;
+  // March and November are 245 days == 35.0 weeks apart, so 1st sunday in Nov is the same DOW
+  dst_end_day = dst_start_day + 245 - 7;  // 1st sunday, not 2nd.
   dst_cache_year = year;
 }
 
 // ET DST begins at 2am local time on 2nd Sunday in March.
 // At that point, local time is UTC-5, so 2am local is 7am UTC.
 // The local time jumps to 3am.
-// ET DST ends at 2am local time on 2nd Sunday in November.
+// ET DST ends at 2am local time on 1st Sunday in November.
 // At that point, local time is UTC-4, so 2am local is 6am UTC.
 // The local time then slips back to 1am (UTC-5).
 
