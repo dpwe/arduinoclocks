@@ -9,8 +9,6 @@
 // with a 128x64 OLED display and 3 input buttons.
 
 #include <Wire.h>
-// Default I2C ("Wire") is actually Wire1 on RP2040 Feather
-#define Wire Wire1
 
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
 
@@ -19,24 +17,41 @@
 // =============================================================
 
 // Wiring:
-//   DS3231 SQWV out -> D24
-//   GPS 1PPS out    -> D25
 //   GPS tx out      -> D0 (for Serial1 RX)
+//   GPS 1PPS out    -> A2 (GP28)
+//   DS3231 SQWV out -> A3 (GP29)
 
-const int sqwPin = 24; // The number of the pin for monitor alarm status on DS3231
-const int ppsPin = 25; // PPS output from GPS board
-
+const int ppsPin = 28; // (A2) PPS output from GPS board
 const int ledPin = 13; // On-board LED
 
-// RP2040 Feather pins
-//const int sda_pin = 2;
-//const int scl_pin = 3;
+// RP2040 Feather pins - default I2C
+// Default I2C ("Wire") is actually Wire1 on RP2040 Feather
+// But let's use Wire (I2C0) to communicate with the external DS3231
+// You can put it on so many pins, but most have problems;
+// 0/1 - 1 is used for the UART RX from the GPS
+// 4/5 - 5 is used for button 0 from the display board
+// 8/9 - 8 and 9 are used for buttons 1 and 2 on display board
+// 12/13 - 13 is the on-board LED used to echo SQWV
+// 16/17 - are not brought to pins on Feather RP2040
+// 20/21 - 21 is not brought to pin on Feather RP2040
+// 24/25 - were originally my interrupt inputs, but YAY we have a winner.  Interrupts move to A2/A3
+#ifdef DS3231_ON_EXTERNAL_I2C
+const int sda_pin = 24;
+const int scl_pin = 25;
+const int sqwPin = 29; // (A3) SQWV output from DS3231
+#else
+// If using standard Feather I2C...
+#define Wire Wire1
+const int sda_pin = 2;
+const int scl_pin = 3;
+const int sqwPin = 27; // (A1) SQWV output from Feather DS3231
+#endif // DS3231_ON_EXTERNAL_I2C
 
 
 // UI:
 //  Top button:     Sync DS3231 to time from GPS
-//  Middle button:  Emit Z command od Serial TX
-//  Bottom button:  (Cycle display?)
+//  Middle button:  Increase loading via Offset Register
+//  Bottom button:  Decrease loading via Offset Register
 
 
 volatile unsigned long rtc_micros = 0;
@@ -63,9 +78,9 @@ void setup_interrupts() {
 // ======================================================
 
 // Ignore the first few syncs for RTC and GPS, to avoid noisy initial pulses.
-#define MIN_SYNC_COUNT 4  
+#define MIN_SYNC_COUNT 10
 // How many secs back to let the oldest sync go
-#define OLDEST_CLOCK_SYNC_SECS 30
+#define CLOCK_SYNC_INTERVAL_SECS 30
 
 
 class Clock {
@@ -78,12 +93,16 @@ class Clock {
   // Calibrated system ticks per Clock's second.  
   // This is stored in tenths of microseconds to allow fractional microseconds.
   long decimicros_per_sec_ = 10000000;   // 10^7
-  // for time since oldest sync.
+  long nanoseconds_error_per_sec_ = 0;
+  // for time since the first sync seen.
   time_t oldest_sync_unixtime_ = 0;
   unsigned long oldest_sync_micros_ = 0;
+  // for time since older sync.
+  time_t older_sync_unixtime_ = 0;
+  unsigned long older_sync_micros_ = 0;
   // Store one intermediate value so we can hop.
-  time_t next_oldest_sync_unixtime_ = 0;
-  unsigned long next_oldest_sync_micros_ = 0;
+  time_t next_older_sync_unixtime_ = 0;
+  unsigned long next_older_sync_micros_ = 0;
   // Count how many syncs we've received.
   int sync_count_ = 0;
   int min_sync_count_ = 0;
@@ -119,21 +138,23 @@ class Clock {
       if (oldest_sync_micros_ == 0) {
         oldest_sync_micros_ = sync_micros;
         oldest_sync_unixtime_ = sync_unixtime;
-        next_oldest_sync_micros_ = sync_micros;
-        next_oldest_sync_unixtime_ = sync_unixtime;
+        older_sync_micros_ = sync_micros;
+        older_sync_unixtime_ = sync_unixtime;
+        next_older_sync_micros_ = sync_micros;
+        next_older_sync_unixtime_ = sync_unixtime;
       } else {
-        if ((sync_unixtime - next_oldest_sync_unixtime_) > OLDEST_CLOCK_SYNC_SECS) {
+        if ((sync_unixtime - next_older_sync_unixtime_) > CLOCK_SYNC_INTERVAL_SECS) {
           // Push a (time, micros) sync pair onto the (short) queue every 2 minutes.
-          oldest_sync_micros_ = next_oldest_sync_micros_;
-          oldest_sync_unixtime_ = next_oldest_sync_unixtime_;
-          next_oldest_sync_micros_ = sync_micros;
-          next_oldest_sync_unixtime_ = sync_unixtime;
+          older_sync_micros_ = next_older_sync_micros_;
+          older_sync_unixtime_ = next_older_sync_unixtime_;
+          next_older_sync_micros_ = sync_micros;
+          next_older_sync_unixtime_ = sync_unixtime;
         }
         // This is going to wrap at 2**32 / 1e7 = 420 secs, or about 7 minutes.
         // Hopefully the queue will ensure it's never more than ~4 minutes.
-        int delta_seconds = sync_unixtime - oldest_sync_unixtime_;
+        int delta_seconds = sync_unixtime - older_sync_unixtime_;
         if (delta_seconds < 400) {
-          decimicros_per_sec_ = (10 * (sync_micros - oldest_sync_micros_)) / 
+          decimicros_per_sec_ = (10 * (sync_micros - older_sync_micros_)) / 
                                 delta_seconds;
         }
       }
@@ -141,14 +162,36 @@ class Clock {
     base_micros_ = sync_micros;
     base_unixtime_ = sync_unixtime;
     synced_ = true;
+
+    nanoseconds_error_per_sec_ = all_time_nanos_per_sec(sync_unixtime, sync_micros);
+  }
+
+  long all_time_nanos_per_sec(time_t sync_unixtime, unsigned long sync_micros) {
+    // Use the oldest sync to calculate the long-time average nanos per sync.
+    long micros_drift = sync_micros - oldest_sync_micros_;
+    int interval_seconds = sync_unixtime - oldest_sync_unixtime_;
+    // There will be wrap in the micros difference, but the residual after subtracting the seconds should be OK.
+    micros_drift -= 1000000 * interval_seconds;
+    Serial.print(name_);
+    Serial.print(" micros_drift=");
+    Serial.print(micros_drift);
+    Serial.print(" in ");
+    Serial.print(interval_seconds);
+    Serial.print(" seconds = ");
+    int nanoseconds_error = (1000 * micros_drift) / interval_seconds;
+    Serial.print(nanoseconds_error);
+    Serial.println(" ns err");
+    return nanoseconds_error;
   }
 
   void clear_sync_history(void) {
     // If we think there's a discontinuity in sync history.
     oldest_sync_unixtime_ = 0;
     oldest_sync_micros_ = 0;
-    next_oldest_sync_unixtime_ = 0;
-    next_oldest_sync_micros_ = 0;
+    older_sync_unixtime_ = 0;
+    older_sync_micros_ = 0;
+    next_older_sync_unixtime_ = 0;
+    next_older_sync_micros_ = 0;
     sync_count_ = 0;
     synced_ = false;
   }
@@ -213,7 +256,7 @@ void sync_time_from_RTC(void) {
 }
 
 void setup_RTC(void) {
-  if (! rtc.begin()) {
+  if (! rtc.begin(&Wire)) {
     Serial.println("Couldn't find RTC");
     Serial.flush();
     abort();
@@ -245,7 +288,7 @@ void update_RTC(void) {
     sync_time_from_RTC();
     pending_RTC_interrupt = false;
   }
-  have_rtc = (sys_secs - rtc_clock.base_unixtime_) < MIN_RTC_SYNC_GAP;
+  have_rtc = (sys_secs - ((long)rtc_clock.base_unixtime_)) < MIN_RTC_SYNC_GAP;
   if (have_rtc) {
     int sys_mins = (sys_secs / 60) % 60;
     if (sys_mins != last_min) {
@@ -440,7 +483,10 @@ char *sprint_clock_comparison(char *s, class Clock& clock, class Clock& ref_cloc
   // Approximate (1 + a)/(1 + b) - 1 as (a - b) (i.e. 1/(1 + b) = 1 - b, and a/(1 + b) = a), for a, b << 1.
   int decimicro_deviation = ref_clock.decimicros_per_sec_ - clock.decimicros_per_sec_;
   s = sprint_int(s, decimicro_deviation, /* dp */ 1);
-  strcpy(s, "ppm");
+  strcpy(s, "ppm ");
+  s += strlen(s);
+  s = sprint_int(s, ref_clock.nanoseconds_error_per_sec_ - clock.nanoseconds_error_per_sec_, /* dp */ 3);
+  *s++ = 0;
   return entry_s;
 }
 
@@ -483,7 +529,7 @@ void serial_clock_debug(class Clock& clock) {
   sprint_unixtime(s, clock.base_unixtime_, false);
   Serial.print(s);
   Serial.print(" osut=");
-  sprint_unixtime(s, clock.oldest_sync_unixtime_, false);
+  sprint_unixtime(s, clock.older_sync_unixtime_, false);
   Serial.print(s);
 }
 
@@ -640,9 +686,10 @@ void buttons_update(void) {
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 
-Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
+Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire1);
 
 void setup_display(void) {
+  
   display.begin(0x3C, true); // Address 0x3C default
 
   // Show image buffer on the display hardware.
@@ -695,8 +742,9 @@ void update_display(void) {
 
 void setup() {
   // Configure Pico RP2040 I2C
-  //Wire.setSDA(sda_pin);
-  //Wire.setSCL(scl_pin);
+  Wire.setSDA(sda_pin);
+  Wire.setSCL(scl_pin);
+  Wire.begin();
   // I2C interface is started by display driver.
   
   // initialize serial communication at 9600 bits per second.
@@ -733,7 +781,7 @@ void loop() {
   update_GPS();
   sys_secs = sys_clock->unixtime();
   if(gps_clock.synced_ && 
-     (!gps_has_been_live || (gps_clock.base_unixtime_ - sys_secs) < GPS_TIMEOUT_SECS)) {
+     (!gps_has_been_live || (((long)gps_clock.base_unixtime_) - sys_secs) < GPS_TIMEOUT_SECS)) {
     // GPS is sync'ing, and it has been sync'd recently, or it's the first time we've seen it sync'd
     // (in which case the difference from sys_secs may be immaterial).
     sys_clock = &gps_clock;
