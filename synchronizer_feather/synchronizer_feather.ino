@@ -923,7 +923,7 @@ void setup() {
 #define GPS_TIMEOUT_SECS 5
 
 // How long before screen dims?
-#define DISPLAY_SLEEP_SECS 60
+#define DISPLAY_SLEEP_SECS 300
 time_t last_action = 0;
 
 boolean gps_has_been_live = false;
