@@ -12,10 +12,6 @@
 
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
 
-// =============================================================
-// PPS change time recording.
-// =============================================================
-
 // Wiring:
 //   GPS tx out      -> D0 (for Serial1 RX)
 //   GPS 1PPS out    -> A2 (GP28)
@@ -35,31 +31,42 @@ const int ledPin = 13; // On-board LED
 // 16/17 - are not brought to pins on Feather RP2040
 // 20/21 - 21 is not brought to pin on Feather RP2040
 // 24/25 - were originally my interrupt inputs, but YAY we have a winner.  Interrupts move to A2/A3
-#ifdef DS3231_ON_EXTERNAL_I2C
-const int sda_pin = 24;
-const int scl_pin = 25;
-const int sqwPin = 29; // (A3) SQWV output from DS3231
-#else
+//#ifdef DS3231_ON_EXTERNAL_I2C
+const int ext_sda_pin = 24;
+const int ext_scl_pin = 25;
+const int ext_sqwPin = 29; // (A3) SQWV output from DS3231
+//#else
 // If using standard Feather I2C...
-#define Wire Wire1
-const int sda_pin = 2;
-const int scl_pin = 3;
-const int sqwPin = 27; // (A1) SQWV output from Feather DS3231
-#endif // DS3231_ON_EXTERNAL_I2C
+//#define Wire Wire1
+const int int_sda_pin = 2;
+const int int_scl_pin = 3;
+const int int_sqwPin = 27; // (A1) SQWV output from Feather DS3231
+//#endif // DS3231_ON_EXTERNAL_I2C
 
 
 // UI:
-//  Top button:     Sync DS3231 to time from GPS
-//  Middle button:  Increase loading via Offset Register
-//  Bottom button:  Decrease loading via Offset Register
+//  Top button:     Short: Swap focus between internal and external DS3231
+//                  Long: Sleep display.
+//  Middle button:  Short: Increase loading via Offset Register
+//                  Long: Emit sync command on serial
+//  Bottom button:  Short: Decrease loading via Offset Register
+//                  Long: Sync DS3231 to time from GPS
 
+// =============================================================
+// PPS change time recording.
+// =============================================================
 
-volatile unsigned long rtc_micros = 0;
+volatile unsigned long int_rtc_micros = 0;
+volatile unsigned long ext_rtc_micros = 0;
 volatile unsigned long gps_micros = 0;
 
-void rtc_mark_isr(void)
+void int_rtc_mark_isr(void)
 {
-  rtc_micros = micros();
+  int_rtc_micros = micros();
+}
+void ext_rtc_mark_isr(void)
+{
+  ext_rtc_micros = micros();
 }
 void gps_mark_isr(void)
 {
@@ -68,7 +75,8 @@ void gps_mark_isr(void)
 
 void setup_interrupts() {
   // DS3231 is on falling edge.
-  attachInterrupt(digitalPinToInterrupt(sqwPin), rtc_mark_isr, FALLING);
+  attachInterrupt(digitalPinToInterrupt(int_sqwPin), int_rtc_mark_isr, FALLING);
+  attachInterrupt(digitalPinToInterrupt(ext_sqwPin), ext_rtc_mark_isr, FALLING);
   // GPS mark is on rising edge.
   attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
 } 
@@ -82,7 +90,6 @@ void setup_interrupts() {
 // How many secs back to let the oldest sync go
 #define CLOCK_SYNC_INTERVAL_SECS 30
 
-
 class Clock {
  public:
   const char *name_ = 0;
@@ -94,6 +101,8 @@ class Clock {
   // This is stored in tenths of microseconds to allow fractional microseconds.
   long decimicros_per_sec_ = 10000000;   // 10^7
   long nanoseconds_error_per_sec_ = 0;
+  time_t measurement_period_secs_ = 0;
+  bool ppm_tracking_ = false;  // is nanoseconds_error meaningful?
   // for time since the first sync seen.
   time_t oldest_sync_unixtime_ = 0;
   unsigned long oldest_sync_micros_ = 0;
@@ -168,19 +177,24 @@ class Clock {
 
   long all_time_nanos_per_sec(time_t sync_unixtime, unsigned long sync_micros) {
     // Use the oldest sync to calculate the long-time average nanos per sync.
+    if (oldest_sync_micros_ == 0) {
+      // we have not yet started tracking error.
+      return 0;
+    }
     long micros_drift = sync_micros - oldest_sync_micros_;
-    int interval_seconds = sync_unixtime - oldest_sync_unixtime_;
+    measurement_period_secs_ = sync_unixtime - oldest_sync_unixtime_;
     // There will be wrap in the micros difference, but the residual after subtracting the seconds should be OK.
-    micros_drift -= 1000000 * interval_seconds;
-    Serial.print(name_);
-    Serial.print(" micros_drift=");
-    Serial.print(micros_drift);
-    Serial.print(" in ");
-    Serial.print(interval_seconds);
-    Serial.print(" seconds = ");
-    int nanoseconds_error = (1000 * micros_drift) / interval_seconds;
-    Serial.print(nanoseconds_error);
-    Serial.println(" ns err");
+    micros_drift -= 1000000 * measurement_period_secs_;
+    //Serial.print(name_);
+    //Serial.print(" micros_drift=");
+    //Serial.print(micros_drift);
+    //Serial.print(" in ");
+    //Serial.print(interval_seconds);
+    //Serial.print(" seconds = ");
+    int nanoseconds_error = (1000 * micros_drift) / (int)measurement_period_secs_;
+    //Serial.print(nanoseconds_error);
+    //Serial.println(" ns err");
+    ppm_tracking_ = true;
     return nanoseconds_error;
   }
 
@@ -194,111 +208,172 @@ class Clock {
     next_older_sync_micros_ = 0;
     sync_count_ = 0;
     synced_ = false;
+    nanoseconds_error_per_sec_ = 0;
+    measurement_period_secs_ = 0;
+    ppm_tracking_ = false;
   }
-
 };
 
-Clock rtc_clock("RTC");
+Clock int_rtc_clock("iRT");
+Clock ext_rtc_clock("xRT");
 Clock gps_clock("GPS");
-Clock *sys_clock = &rtc_clock;
+Clock *sys_clock = &int_rtc_clock;
 
 // ======================================================
 // Track RTC times.
 // ======================================================
 
 #include "RTClib.h"
-RTC_DS3231 rtc;
 
 // from DS3231.cpp
 #define CLOCK_ADDRESS 0x68
 
-void ds3231_readAllRegisters(byte *registers, int num_bytes /* =19 */) {
-  // Read all 19 bytes from the clock status.
-  if (num_bytes > 19) num_bytes = 19;
-  Wire.beginTransmission(CLOCK_ADDRESS);
-  Wire.write(0x0);
-    Wire.endTransmission();
-    Wire.requestFrom(CLOCK_ADDRESS, num_bytes);
-  for(int i = 0; i < num_bytes; ++i) {
-     registers[i] = Wire.read();
-  }
-}
-
-int ds3231_getAgingOffset(void) {
-  // Read aging offset register
-  Wire.beginTransmission(CLOCK_ADDRESS);
-  Wire.write(0x10);
-  Wire.endTransmission();
-  Wire.requestFrom(CLOCK_ADDRESS, 1);
-  int regVal = Wire.read();
-  if (regVal > 127) regVal -= 256;
-  return regVal;
-}
-
-void ds3231_setAgingOffset(int offset) {
-  // Write the aging register. 
-  // It's a signed 8 bit value, -128..127
-  // Crystal *slows* by approx 0.1 ppm per unit.
-  Wire.beginTransmission(CLOCK_ADDRESS);
-  Wire.write(0x10);
-  Wire.write(offset);
-  Wire.endTransmission();
-}
-
-bool pending_RTC_interrupt = false;
-
-unsigned long last_rtc_micros = 0;
-
-void sync_time_from_RTC(void) {
-  // This is called soon after an A0 transition is detected, so RTC unixtime is still current.
-  rtc_clock.sync(rtc.now().unixtime(), rtc_micros);
-  last_rtc_micros = rtc_micros;
-}
-
-void setup_RTC(void) {
-  if (! rtc.begin(&Wire)) {
-    Serial.println("Couldn't find RTC");
-    Serial.flush();
-    abort();
-  }
-
-  rtc.writeSqwPinMode(DS3231_SquareWave1Hz); // Place SQW pin into 1 Hz mode
-  pinMode(sqwPin, INPUT_PULLUP); // Set alarm pin as pullup
-  pinMode(ledPin, OUTPUT);
-
-  // Sync even without interrupts
-  rtc_micros = micros();
-  sync_time_from_RTC();
-}
-
-int last_min = 0;
-int rtc_aging = 0;
-int rtc_temperature_centidegs = 0.0;
-
-// Updated in main loop.
-long sys_secs = 0;
-
-bool have_rtc = false;
-
 // Give up on RTC if no sync in this long.
-#define MIN_RTC_SYNC_GAP 3
+#define MIN_RTC_SYNC_GAP 5
 
-void update_RTC(void) {
-  if (pending_RTC_interrupt) {
-    sync_time_from_RTC();
-    pending_RTC_interrupt = false;
+static uint8_t bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
+
+class DS3231_holder {
+ public:
+ 
+  RTC_DS3231 rtc;
+  boolean have_rtc = false;
+  TwoWire *pwire = NULL;
+  int sqwPin = 0; 
+  volatile unsigned long *prtc_micros = NULL;
+  unsigned long last_rtc_micros = 0;
+  Clock *pclock = NULL;
+  int last_min = 0;
+  int rtc_aging = 0;
+  int rtc_temperature_centidegs = 0;
+
+  DS3231_holder(int pin, volatile unsigned long *pmicros, Clock *p_clock) 
+    : sqwPin(pin), prtc_micros(pmicros), pclock(p_clock) { 
   }
-  have_rtc = (sys_secs - ((long)rtc_clock.base_unixtime_)) < MIN_RTC_SYNC_GAP;
-  if (have_rtc) {
-    int sys_mins = (sys_secs / 60) % 60;
-    if (sys_mins != last_min) {
-      last_min = sys_mins;
-      // Update temp 1/min.
-      rtc_temperature_centidegs = (int)(100 * rtc.getTemperature());
-      rtc_aging = ds3231_getAgingOffset();
+
+  void readAllRegisters(byte *registers, int num_bytes = 19) {
+    // Read all 19 bytes from the clock status.
+    if (num_bytes > 19) num_bytes = 19;
+    pwire->beginTransmission(CLOCK_ADDRESS);
+    pwire->write(0x0);
+      pwire->endTransmission();
+      pwire->requestFrom(CLOCK_ADDRESS, num_bytes);
+    for(int i = 0; i < num_bytes; ++i) {
+       registers[i] = pwire->read();
     }
   }
-}
+  
+  int getTemperatureCentidegs(void) {
+    // Read temperature register
+    pwire->beginTransmission(CLOCK_ADDRESS);
+    pwire->write(0x11);
+    pwire->endTransmission();
+    pwire->requestFrom(CLOCK_ADDRESS, 2);
+    int regVal = pwire->read() << 2;
+    regVal += pwire->read() >> 6;
+    return 25 * regVal;
+  }
+
+  void getAlarm1(int *phour, int *pmin) const {
+    // Read Alarm1 registers.
+    // Alarm 1 is reg 0x07..0x0A, sec/min/hr/day
+    pwire->beginTransmission(CLOCK_ADDRESS);
+    pwire->write(0x08);
+    pwire->endTransmission();
+    pwire->requestFrom(CLOCK_ADDRESS, 2);
+    *pmin = bcd2bin(pwire->read());
+    *phour = bcd2bin(pwire->read());
+  }
+
+  void getAlarm2(int *phour, int *pmin) const {
+    // Read Alarm2 registers.
+    // Alarm 2 is reg 0x0B..0x0D, min/hr/day
+    pwire->beginTransmission(CLOCK_ADDRESS);
+    pwire->write(0x0B);
+    pwire->endTransmission();
+    pwire->requestFrom(CLOCK_ADDRESS, 2);
+    *pmin = bcd2bin(pwire->read());
+    *phour = bcd2bin(pwire->read());
+  }
+
+  int getAgingOffset(void) {
+    // Read aging offset register
+    pwire->beginTransmission(CLOCK_ADDRESS);
+    pwire->write(0x10);
+    pwire->endTransmission();
+    pwire->requestFrom(CLOCK_ADDRESS, 1);
+    int regVal = pwire->read();
+    if (regVal > 127) regVal -= 256;
+    return regVal;
+  }
+
+  void setAgingOffset(int offset) {
+    // Write the aging register. 
+    // It's a signed 8 bit value, -128..127
+    // Crystal *slows* by approx 0.1 ppm per unit.
+    pwire->beginTransmission(CLOCK_ADDRESS);
+    pwire->write(0x10);
+    pwire->write(offset);
+    pwire->endTransmission();
+  }
+
+  void sync_clock_to_rtc(void) {
+    // This is called soon after an A0 transition is detected, so RTC unixtime is still current.
+    last_rtc_micros = *prtc_micros;
+    pclock->sync(rtc.now().unixtime(), last_rtc_micros);
+  }
+  
+  bool pending_interrupt(void) {
+    unsigned long rtc_micros = *prtc_micros;
+    if (rtc_micros == last_rtc_micros)  return false;
+    last_rtc_micros = rtc_micros;
+    return true;
+  }
+
+  void setup(TwoWire *p_wire) {
+    pwire = p_wire;
+    if (!rtc.begin(pwire)) {
+      Serial.println("Couldn't find RTC");
+      Serial.flush();
+      abort();
+    }
+    rtc.writeSqwPinMode(DS3231_SquareWave1Hz); // Place SQW pin into 1 Hz mode
+    pinMode(sqwPin, INPUT_PULLUP); // Set alarm pin as pullup
+    // Sync even without interrupts
+    *prtc_micros = micros();
+    sync_clock_to_rtc();
+  }
+
+  void update(time_t sys_secs) {
+    if (pending_interrupt()) {
+      sync_clock_to_rtc();
+    }
+    have_rtc = (sys_secs - pclock->base_unixtime_) < MIN_RTC_SYNC_GAP;
+    if (have_rtc) {
+      int sys_mins = (sys_secs / 60) % 60;
+      if (sys_mins != last_min) {
+        last_min = sys_mins;
+        // Update temp 1/min.
+        rtc_temperature_centidegs = getTemperatureCentidegs();
+        rtc_aging = getAgingOffset();
+      }
+    }
+  }
+};
+
+DS3231_holder int_rtc(int_sqwPin, &int_rtc_micros, &int_rtc_clock);
+DS3231_holder ext_rtc(ext_sqwPin, &ext_rtc_micros, &ext_rtc_clock);
+
+class DS3231_holder *active_rtc = &ext_rtc;
+class DS3231_holder *alt_rtc = &int_rtc;
+
+
+#include <Timezone.h>       // https://github.com/JChristensen/Timezone
+// US Eastern Time Zone (New York, Detroit)
+TimeChangeRule myDST = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
+TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
+Timezone myTZ(myDST, mySTD);
+
 
 // ======================================================
 // Track GPS times.
@@ -310,8 +385,6 @@ void update_RTC(void) {
 #define SerialGPS Serial1 
 
 TinyGPS gps;
-
-bool pending_GPS_interrupt = false;
 
 time_t gps_now(class TinyGPS& gps) {
   tmElements_t tm;
@@ -346,6 +419,12 @@ bool gps_time_valid(class TinyGPS& gps) {
 
 unsigned long last_gps_micros = 0;
 
+bool pending_GPS_interrupt(void) {
+  if (gps_micros == last_gps_micros)  return false;
+  last_gps_micros = gps_micros;
+  return true;
+}
+
 void sync_time_from_GPS(void) {
   // This is called soon after an A1 transition is detected, so GPS unixtime is still current.
   if (gps_time_valid(gps)) {
@@ -367,7 +446,7 @@ void update_GPS_serial(void) {
   }
 }
 
-bool request_RTC_sync = false;
+DS3231_holder* request_sync_RTC = NULL;
 bool request_sync_output = false;
 
 void setup_GPS(void) {
@@ -375,15 +454,14 @@ void setup_GPS(void) {
 }
 
 void update_GPS(void) {
-  if (pending_GPS_interrupt) {
+  if (pending_GPS_interrupt()) {
     sync_time_from_GPS();
-    pending_GPS_interrupt = false;
     // Request for sync e.g. from button press.
-    if (request_RTC_sync) {
+    if (request_sync_RTC) {
       Serial.println("Setting DS3231 from GPS");
-      rtc.adjust(DateTime(gps_clock.unixtime()));
-      rtc_clock.clear_sync_history();  // Old sync records are irrelevant now.
-      request_RTC_sync = false;
+      request_sync_RTC->rtc.adjust(DateTime(gps_clock.unixtime()));
+      request_sync_RTC->pclock->clear_sync_history();  // Old sync records are irrelevant now.
+      request_sync_RTC = NULL;
     }
     if (request_sync_output) {
       emit_sync_command(gps_clock.unixtime());
@@ -427,7 +505,7 @@ char *sprint_unixtime(char *s, time_t t, bool show_date=false)
   char *entry_s = s;
   // s must provide 20 bytes, or 9 if just time.
   tmElements_t tm;
-  breakTime(t, tm);
+  breakTime(myTZ.toLocal(t), tm);
   if (show_date) {
     s = sprint_int(s, tm.Year + 1970);
     *s++ = '-';
@@ -481,30 +559,44 @@ char *sprint_clock_comparison(char *s, class Clock& clock, class Clock& ref_cloc
   strcpy(s, "ms ");
   s += strlen(s);
   // Approximate (1 + a)/(1 + b) - 1 as (a - b) (i.e. 1/(1 + b) = 1 - b, and a/(1 + b) = a), for a, b << 1.
-  int decimicro_deviation = ref_clock.decimicros_per_sec_ - clock.decimicros_per_sec_;
-  s = sprint_int(s, decimicro_deviation, /* dp */ 1);
-  strcpy(s, "ppm ");
-  s += strlen(s);
-  s = sprint_int(s, ref_clock.nanoseconds_error_per_sec_ - clock.nanoseconds_error_per_sec_, /* dp */ 3);
+  //int decimicro_deviation = ref_clock.decimicros_per_sec_ - clock.decimicros_per_sec_;
+  //s = sprint_int(s, decimicro_deviation, /* dp */ 1);
+  //strcpy(s, "ppm ");
+  //s += strlen(s);
+  if (clock.ppm_tracking_) {
+    s = sprint_int(s, ref_clock.nanoseconds_error_per_sec_ - clock.nanoseconds_error_per_sec_, /* dp */ 3);
+    strcpy(s, "ppm/");
+    s += strlen(s);
+    s = sprint_int(s, clock.measurement_period_secs_);
+    strcpy(s, "s");
+    s += strlen(s);
+  }
   *s++ = 0;
   return entry_s;
 }
 
-char *sprint_rtc_info(char *s) {
+char *sprint_rtc_info(char *s, const class DS3231_holder &rtc) {
   // Read RTC info from globals.
   char *entry_s = s;
   //strcpy(s, "RTC: ");
   //s += strlen(s);
-  if (!have_rtc) {
+  if (!rtc.have_rtc) {
     strcpy(s, "no RTC");
     return entry_s;
   }
   strcpy(s, "t=");
   s += strlen(s);
-  s = sprint_int(s, rtc_temperature_centidegs, 2);
+  s = sprint_int(s, rtc.rtc_temperature_centidegs, 2);
   strcpy(s, " a=");
   s += strlen(s);
-  s = sprint_int(s, rtc_aging);
+  s = sprint_int(s, rtc.rtc_aging);
+  strcpy(s, " A2=");
+  s += strlen(s);
+  int h, m;
+  rtc.getAlarm2(&h, &m);
+  s = sprint_int2(s, h);
+  *s++ = ':';  
+  s = sprint_int2(s, m);
   *s++ = 0;
   return entry_s;
 }
@@ -515,21 +607,21 @@ void serial_print_clock_comparison(class Clock& clock, class Clock& ref_clock) {
   Serial.print(s);
 }
 
-void serial_clock_debug(class Clock& clock) {
+void serial_clock_debug(class Clock* pclock) {
     char s[9];
   Serial.print(" ");
-  Serial.print(clock.name_);
+  Serial.print(pclock->name_);
   Serial.print(": ");
-  serial_print_unixtime(clock.unixtime());
+  serial_print_unixtime(pclock->unixtime());
   Serial.print(" dmspt=");
-  Serial.print(clock.decimicros_per_sec_);
+  Serial.print(pclock->decimicros_per_sec_);
   Serial.print(" syncs=");
-  Serial.print(clock.sync_count_);
+  Serial.print(pclock->sync_count_);
   Serial.print(" sync=");
-  sprint_unixtime(s, clock.base_unixtime_, false);
+  sprint_unixtime(s, pclock->base_unixtime_, false);
   Serial.print(s);
   Serial.print(" osut=");
-  sprint_unixtime(s, clock.older_sync_unixtime_, false);
+  sprint_unixtime(s, pclock->older_sync_unixtime_, false);
   Serial.print(s);
 }
 
@@ -540,7 +632,7 @@ void serial_print_registers(void) {
   // Read all 19 DS3231 registers and print out in hex.
   Serial.print("DS3231 Regs: ");
   byte registers[NUM_REGISTERS];
-  ds3231_readAllRegisters(registers, NUM_REGISTERS);
+  active_rtc->readAllRegisters(registers, NUM_REGISTERS);
   for (int i = 0; i < NUM_REGISTERS; ++i) {
     if (registers[i] < 16)  Serial.print("0");
     Serial.print(registers[i], HEX);
@@ -580,7 +672,7 @@ void cmd_update(void) {
             break;
           case 'S':
             // Sync DS3231 to GPS
-            request_RTC_sync = true;
+            request_sync_RTC = active_rtc;
             break;
           case 'R':
             // Read DS3231 registers
@@ -594,12 +686,12 @@ void cmd_update(void) {
           case 'T':
             // Read DS3231 temperature
             Serial.print("DS3231 temperature=");
-            Serial.println(rtc.getTemperature());
+            Serial.println(active_rtc->getTemperatureCentidegs() / 100.0);
             break;
           case 'A':
             // Set DS3231 aging register.
             int aging_offset = atoi(cmd_buffer + 1);
-            ds3231_setAgingOffset(aging_offset);
+            active_rtc->setAgingOffset(aging_offset);
             Serial.print("Aging offset set to ");
             Serial.println(aging_offset);
             break;
@@ -616,66 +708,11 @@ void cmd_update(void) {
 
 void adjust_rtc_trim(int val) {
   // Adjust the DS3231 "aging register" trim by specified amount relative.
-  rtc_aging = ds3231_getAgingOffset();
-  rtc_aging += val;
-  ds3231_setAgingOffset(rtc_aging);
+  active_rtc->rtc_aging = ext_rtc.getAgingOffset();
+  active_rtc->rtc_aging += val;
+  active_rtc->setAgingOffset(ext_rtc.rtc_aging);
   Serial.print("rtc_aging=");
-  Serial.println(rtc_aging);
-}
-
-// ======================================================
-// =========== Button management ==============
-// ======================================================
-
-#define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
-int button_pins[NUM_BUTTONS] = {9, 8, 7};
-int button_state[NUM_BUTTONS] = {0, 0, 0};
-unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
-#define DEBOUNCE_MILLIS 50
-
-void buttons_setup(void) {
-  for (int button = 0; button < NUM_BUTTONS; ++button) {
-    pinMode(button_pins[button], INPUT_PULLUP);
-  }
-}
-
-void buttons_update(void) {
-  for (int button = 0; button < NUM_BUTTONS; ++button) {
-    // Buttons are pulled up, so read as 1 when open, 0 when pressed.
-    int new_state = 1 - digitalRead(button_pins[button]);
-    if (button_state[button] == new_state) {
-      continue;
-    }
-    // State has changed.
-    unsigned long millis_now = millis();
-    unsigned long millis_since_last_change = millis_now - button_last_change_time[button];
-    button_last_change_time[button] = millis_now;
-    if (millis_since_last_change <= DEBOUNCE_MILLIS) {
-      continue;
-    }
-    // Debounced state change
-    button_state[button] = new_state;
-    if (!new_state) {
-      continue;
-    }
-    // State change was to "pressed".
-    switch(button) {
-      case 0:
-        // Write GPS time to RTC at next good opportunity.
-        request_RTC_sync = true;
-        break;
-      case 1:
-        // Increase aging register
-        adjust_rtc_trim(1);
-        //// Emit a sync command.
-        //request_sync_output = true;
-        break;
-      case 2:
-        // Decrease aging register
-        adjust_rtc_trim(-1);
-        break;
-    }
-  }
+  Serial.println(active_rtc->rtc_aging);
 }
 
 // ======================================================
@@ -686,7 +723,20 @@ void buttons_update(void) {
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 
+bool display_on = false;
+
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire1);
+
+void wake_up_display(void) {
+  display_on = true;
+  update_display(active_rtc);
+}
+
+void sleep_display(void) {
+  display.clearDisplay();
+  display.display();
+  display_on = false;
+}
 
 void setup_display(void) {
   
@@ -710,30 +760,131 @@ void setup_display(void) {
   display.setCursor(0,0);
   display.print("DS3231 Feather");
   display.display(); // actually display all of the above
+  display_on = true;
 }
 
-#define TZ_HOURS -5
-
-void update_display(void) {
+void update_display(class DS3231_holder *prtc) {
+  if (!display_on) {
+    return;
+  }
   char s[64];  // We can only use up to 21, but sprint_clock_comparison could get large for very large skews.
   // Line 1: Current time, sync source.
   display.fillRect(0, 0, 128, 64, SH110X_BLACK);
   display.setCursor(0, 0);
   display.setTextSize(2);
-  display.print(sprint_unixtime(s, (*sys_clock).unixtime() + 3600 * TZ_HOURS, false));
+  display.print(sprint_unixtime(s, (*sys_clock).unixtime(), false));
   display.setCursor(110, 0);
   display.setTextSize(1);
   display.print(sys_clock->name_);
   // Line 2: RTC vs GPS.
   display.setCursor(0, 32);
-  display.print("RTC:");
+  display.print(prtc->pclock->name_);
+  display.print(":");
   display.setCursor(0, 41);
-  display.print(sprint_clock_comparison(s, rtc_clock, *sys_clock));
+  display.print(sprint_clock_comparison(s, *(prtc->pclock), *sys_clock));
   // Line 3: RTC status
   display.setCursor(0, 50);
-  display.print(sprint_rtc_info(s));
+  display.print(sprint_rtc_info(s, *prtc));
 
   display.display(); // actually display all of the above
+}
+
+// ======================================================
+// =========== Button management ==============
+// ======================================================
+
+#define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
+int button_pins[NUM_BUTTONS] = {9, 8, 7};
+int button_state[NUM_BUTTONS] = {0, 0, 0};
+unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
+// For distinguishing short/long press
+int button_down_time = 0;
+
+// Keeping track of user interaction to control display sleep.
+long secs_last_action = 0;
+
+#define DEBOUNCE_MILLIS 50
+#define MILLIS_LONG_PRESS 500
+
+void buttons_setup(time_t t) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    pinMode(button_pins[button], INPUT_PULLUP);
+  }
+  secs_last_action = t;
+}
+
+void swap_rtcs(void) {
+  // Swap RTCs
+  class DS3231_holder* tmp = active_rtc;
+  active_rtc = alt_rtc;
+  alt_rtc = tmp;
+  update_display(active_rtc);
+}
+
+void buttons_update(time_t t) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    // Buttons are pulled up, so read as 1 when open, 0 when pressed.
+    int new_state = 1 - digitalRead(button_pins[button]);
+    if (button_state[button] == new_state) {
+      continue;
+    }
+    // State has changed.
+    secs_last_action = t;  // Reset sleep display timeout.
+    unsigned long millis_now = millis();
+    unsigned long millis_since_last_change = millis_now - button_last_change_time[button];
+    button_last_change_time[button] = millis_now;
+    if (millis_since_last_change <= DEBOUNCE_MILLIS) {
+      continue;
+    }
+    // Debounced state change
+    button_state[button] = new_state;
+    if (new_state) {
+      // State changed to "pressed"
+      button_down_time = millis_now;
+      continue;
+    }
+    // State change was to "released".
+    bool long_press = (millis_now - button_down_time) > MILLIS_LONG_PRESS;
+    Serial.print("Button ");
+    Serial.print(button);
+    if (long_press) {
+      Serial.println(" long press");
+    } else {
+      Serial.println(" short press");
+    }
+    if (!display_on) {
+      // Any keypress when display is off just wakes up display.
+      wake_up_display();
+      return;
+    }
+    switch(button) {
+      case 0:
+        if (long_press) {
+          sleep_display();
+        } else {
+          swap_rtcs();
+        }
+        break;
+      case 1:
+        // Increase aging register
+        if (long_press) {
+          // Emit a sync command.
+          request_sync_output = true;
+        } else {
+          adjust_rtc_trim(1);
+        }
+        break;
+      case 2:
+        if (long_press) {
+          // Write GPS time to RTC at next good opportunity.
+          request_sync_RTC = active_rtc;
+          break;
+        }
+        // Decrease aging register
+        adjust_rtc_trim(-1);
+        break;
+    }
+  }
 }
 
 // ======================================================
@@ -741,22 +892,29 @@ void update_display(void) {
 // ======================================================
 
 void setup() {
-  // Configure Pico RP2040 I2C
-  Wire.setSDA(sda_pin);
-  Wire.setSCL(scl_pin);
-  Wire.begin();
-  // I2C interface is started by display driver.
-  
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, HIGH);
   // initialize serial communication at 9600 bits per second.
   Serial.begin(9600);
+  Serial.println("** synchronizer_feather_2DS **");
   Serial.println("Post-reset settling...");
   delay(2000);
+  digitalWrite(ledPin, LOW);
 
+
+  // Configure Pico RP2040 I2C
+  Wire.setSDA(ext_sda_pin);
+  Wire.setSCL(ext_scl_pin);
+  Wire.begin();
+  // I2C interface is started by display driver?
+  //Wire1.begin();
+  
   setup_display();  // includes i2c init.
-  setup_RTC();
+  int_rtc.setup(&Wire1);
+  ext_rtc.setup(&Wire);
   setup_GPS_serial();
   setup_GPS();
-  buttons_setup();
+  buttons_setup(sys_clock->unixtime());
   cmd_setup();
 
   setup_interrupts();
@@ -765,37 +923,46 @@ void setup() {
 // How long can we miss syncs before we give up on GPS clock?
 #define GPS_TIMEOUT_SECS 5
 
+// How long before screen dims?
+#define DISPLAY_SLEEP_SECS 60
+time_t last_action = 0;
+
 boolean gps_has_been_live = false;
 
-long secs_last_change = 0;
+time_t secs_last_change = 0;
 
 void loop() {
-  digitalWrite(ledPin, digitalRead(sqwPin));
+  time_t sys_secs = sys_clock->unixtime();
 
-  buttons_update();
+  digitalWrite(ledPin, digitalRead(active_rtc->sqwPin));
+
+  buttons_update(sys_secs);
   cmd_update();
 
-  if (rtc_micros != last_rtc_micros)  pending_RTC_interrupt = true;
-  if (gps_micros != last_gps_micros)  pending_GPS_interrupt = true;
-  update_RTC();
+  int_rtc.update(sys_secs);
+  ext_rtc.update(sys_secs);
   update_GPS();
-  sys_secs = sys_clock->unixtime();
   if(gps_clock.synced_ && 
-     (!gps_has_been_live || (((long)gps_clock.base_unixtime_) - sys_secs) < GPS_TIMEOUT_SECS)) {
+    (!gps_has_been_live || (((long)gps_clock.base_unixtime_) - sys_secs) < GPS_TIMEOUT_SECS)) {
     // GPS is sync'ing, and it has been sync'd recently, or it's the first time we've seen it sync'd
     // (in which case the difference from sys_secs may be immaterial).
     sys_clock = &gps_clock;
     gps_has_been_live = true;
   } else {
-    sys_clock = &rtc_clock;
+    sys_clock = active_rtc->pclock;
   }
   update_GPS_serial();
   if ((secs_last_change != sys_secs)) {
     secs_last_change = sys_secs;
-    serial_clock_debug(rtc_clock);
-    serial_clock_debug(gps_clock);
+    serial_clock_debug(&gps_clock);
+    serial_clock_debug(int_rtc.pclock);
+    serial_clock_debug(ext_rtc.pclock);
     Serial.println();
     // And on display:
-    update_display();
+    update_display(active_rtc);
+  }
+  // Maybe sleep display
+  if (secs_last_action && (sys_secs - secs_last_action) > DISPLAY_SLEEP_SECS) {
+    sleep_display();
   }
 }
