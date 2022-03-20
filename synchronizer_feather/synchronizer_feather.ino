@@ -127,7 +127,19 @@ class Clock {
     // Strictly, value depends on whether we're evaluating it at this.base_unixtime_, or ref.base_unixtime_.  
     // Use ref, because ref.micros_per_sec is less likely to be wildly off.
     long micros_per_sec = (ref.decimicros_per_sec_ + 5) / 10;  // Apply rounding.
-    return (base_micros_ - ref.base_micros_) - micros_per_sec * (base_unixtime_ - ref.base_unixtime_);
+    long skew_us = ((long)(base_micros_ - ref.base_micros_)) - micros_per_sec * ((long)(base_unixtime_ - ref.base_unixtime_));
+    if (skew_us < -900) {
+      // Tracking bug
+      Serial.print("this base_micros=");
+      Serial.print(base_micros_);
+      Serial.print(" unix_sec=");
+      Serial.println(base_unixtime_ % 3600);
+      Serial.print("ref  base_micros=");
+      Serial.print(ref.base_micros_);
+      Serial.print(" unix_sec=");
+      Serial.println(ref.base_unixtime_ % 3600);
+    }
+    return skew_us;
   }
 
   long unixtime(void) {
@@ -162,7 +174,7 @@ class Clock {
         // This is going to wrap at 2**32 / 1e7 = 420 secs, or about 7 minutes.
         // Hopefully the queue will ensure it's never more than ~4 minutes.
         int delta_seconds = sync_unixtime - older_sync_unixtime_;
-        if (delta_seconds < 400) {
+        if (delta_seconds > 0 && delta_seconds < 400) {
           decimicros_per_sec_ = (10 * (sync_micros - older_sync_micros_)) / 
                                 delta_seconds;
         }
@@ -506,6 +518,24 @@ char *sprint_int2(char *s, int n)
   return s;
 }
 
+char *sprint_interval(char *s, int secs) {
+  // Print an interval in compact format: 33s, 33m59, 4h33
+  if (secs < 60) {
+    s = sprint_int(s, secs);
+    *s++ = 's';
+  } else if (secs < 3600) {
+    s = sprint_int(s, secs / 60);
+    *s++ = 'm';
+    s = sprint_int2(s, secs % 60);
+  } else {
+    int mins = (secs + 30) / 60;
+    s = sprint_int(s, mins / 60);
+    *s++ = 'h';
+    s = sprint_int2(s, mins % 60);
+  }
+  return s;
+}
+
 char *sprint_unixtime(char *s, time_t t, bool show_date=false)
 {  // Returns full terminated string
   char *entry_s = s;
@@ -573,9 +603,7 @@ char *sprint_clock_comparison(char *s, class Clock& clock, class Clock& ref_cloc
     s = sprint_int(s, ref_clock.nanoseconds_error_per_sec_ - clock.nanoseconds_error_per_sec_, /* dp */ 3);
     strcpy(s, "ppm/");
     s += strlen(s);
-    s = sprint_int(s, clock.measurement_period_secs_);
-    strcpy(s, "s");
-    s += strlen(s);
+    s = sprint_interval(s, clock.measurement_period_secs_);
   }
   *s++ = 0;
   return entry_s;
