@@ -359,6 +359,12 @@ class DS3231_holder {
       }
     }
   }
+
+  void delta_trim(int delta) {
+    // Adjust the DS3231 "aging register" trim by specified amount relative.
+    rtc_aging = getAgingOffset() + delta;
+    setAgingOffset(rtc_aging);
+  }
 };
 
 DS3231_holder int_rtc(int_sqwPin, &int_rtc_micros, &int_rtc_clock);
@@ -586,7 +592,7 @@ char *sprint_rtc_info(char *s, const class DS3231_holder &rtc) {
   }
   strcpy(s, "t=");
   s += strlen(s);
-  s = sprint_int(s, rtc.rtc_temperature_centidegs, 2);
+  s = sprint_int(s, rtc.rtc_temperature_centidegs/10, 1);
   strcpy(s, " a=");
   s += strlen(s);
   s = sprint_int(s, rtc.rtc_aging);
@@ -704,15 +710,6 @@ void cmd_update(void) {
       }
     }
   }
-}
-
-void adjust_rtc_trim(int val) {
-  // Adjust the DS3231 "aging register" trim by specified amount relative.
-  active_rtc->rtc_aging = ext_rtc.getAgingOffset();
-  active_rtc->rtc_aging += val;
-  active_rtc->setAgingOffset(ext_rtc.rtc_aging);
-  Serial.print("rtc_aging=");
-  Serial.println(active_rtc->rtc_aging);
 }
 
 // ======================================================
@@ -871,17 +868,19 @@ void buttons_update(time_t t) {
           // Emit a sync command.
           request_sync_output = true;
         } else {
-          adjust_rtc_trim(1);
+          active_rtc->delta_trim(1);
+          update_display(active_rtc);
         }
         break;
       case 2:
         if (long_press) {
           // Write GPS time to RTC at next good opportunity.
           request_sync_RTC = active_rtc;
-          break;
+        } else {
+          // Decrease aging register
+          active_rtc->delta_trim(-1);
+          update_display(active_rtc);
         }
-        // Decrease aging register
-        adjust_rtc_trim(-1);
         break;
     }
   }
