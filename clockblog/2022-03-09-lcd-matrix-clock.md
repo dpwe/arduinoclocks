@@ -1,6 +1,6 @@
 ### ClockBlog
 
-## 2022-04-09 
+## 2022-03-09 
 # KS0108 LCD Matrix Clock
 
 In my quest for synchronization sources, I got interested in the "Atomic Time" broadcast by NIST from Ft Collins Colorado - [WWVB](https://en.wikipedia.org/wiki/WWVB) - that is the basis of consumer self-settig clocks including one I own from La Crosse.  They're temperamental in New York, because the reception from Colorado is weak; however, if I keep mine in a south-facing window, it manages to sync.
