@@ -126,11 +126,18 @@ void serial_print_tm(const tmElements_t &tm)
 // Display
 //------------------------
 
+#define YWROBOT_12864
+#ifdef YWROBOT_12864
 // YwRobot 128x64
 //U8G2_UC1701_MINI12864_1_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 10, /* dc=*/ 9, /* reset=*/ 8);
-// RP2040 feather
+U8G2_ST7565_ERC12864_ALT_1_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 10, /* dc=*/ 9);  // contrast improved version for ERC12864
+#else
+// SPI Green LCD panel
 U8G2_ST7920_128X64_2_HW_SPI u8g2(U8G2_R0, /* CS=*/ 10, /* reset=*/ 8); // Feather HUZZAH ESP8266, E=clock=14, RW=data=13, RS=CS
+#endif
+// RP2040 feather
 //#define SPI SPI0
+
 
 uint8_t big_colon_width = 0;
 uint8_t date_width = 0;
@@ -138,7 +145,9 @@ const char *datefmt = "DDD YYYY-MM-DD";
 
 void setup_display(void) {
   u8g2.begin();
-  //u8g2.setContrast(0);  
+#ifdef YWROBOT_12864
+  u8g2.setContrast(0);  
+#endif
   //u8g2.setFont(u8g2_font_6x10_tf);
   u8g2.setFontRefHeightExtendedText();
   u8g2.setDrawColor(1);
