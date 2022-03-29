@@ -7,7 +7,7 @@ I've made a bunch of digital clocks in different formats:
 
 ![A collection of clocks](images/five-clocks.jpg)
 
-The essence of a clock is keeping track of time.  All these clocks are stand-alone (i.e., not online), and they all get their truth for time from the same source: A [DS3231SN](https://datasheets.maximintegrated.com/en/ds/DS3231.pdf) "extremeley-accurate RTC/TXCO" - a real-time clock (RTC) chip with integrated crystal and, crucially, temperature compensation.  I bought modules based on these chips in packs of five available for under $20 online.
+The essence of a clock is keeping track of time.  All these clocks are stand-alone (i.e., not online), and they all get their truth for time from the same source: A [DS3231SN](https://datasheets.maximintegrated.com/en/ds/DS3231.pdf) "extremely-accurate RTC/TXCO" - a real-time clock (RTC) chip with integrated crystal and, crucially, temperature compensation.  I bought modules based on these chips in packs of five available for under $20 online.
 
 ![Backs of the clocks revealing the DS3231SN modules](images/five-clocks-backs.jpg)
 
