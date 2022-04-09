@@ -126,11 +126,12 @@ void serial_print_tm(const tmElements_t &tm)
 // Display
 //------------------------
 
-#define YWROBOT_12864
+//#define YWROBOT_12864
 #ifdef YWROBOT_12864
+#pragma message("Using YwRobot")
 // YwRobot 128x64
 //U8G2_UC1701_MINI12864_1_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 10, /* dc=*/ 9, /* reset=*/ 8);
-U8G2_ST7565_ERC12864_ALT_1_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 10, /* dc=*/ 9);  // contrast improved version for ERC12864
+U8G2_ST7565_ERC12864_ALT_1_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 10, /* dc=*/ 9, /* reset=*/ 8);  // contrast improved version for ERC12864
 #else
 // SPI Green LCD panel
 U8G2_ST7920_128X64_2_HW_SPI u8g2(U8G2_R0, /* CS=*/ 10, /* reset=*/ 8); // Feather HUZZAH ESP8266, E=clock=14, RW=data=13, RS=CS
@@ -138,6 +139,8 @@ U8G2_ST7920_128X64_2_HW_SPI u8g2(U8G2_R0, /* CS=*/ 10, /* reset=*/ 8); // Feathe
 // RP2040 feather
 //#define SPI SPI0
 
+//#define SMALLFONT u8g2_font_profont11_tr
+#define SMALLFONT System5x7
 
 uint8_t big_colon_width = 0;
 uint8_t date_width = 0;
@@ -156,7 +159,7 @@ void setup_display(void) {
   // Precalculate the width of the average big digit.
   u8g2.setFont(u8g2_font_logisoso34_tn);
   big_colon_width = u8g2.getStrWidth(":");
-  u8g2.setFont(u8g2_font_profont11_tr);
+  u8g2.setFont(SMALLFONT);
   date_width = u8g2.getStrWidth(datefmt);
 }
 
@@ -221,7 +224,7 @@ void update_display(time_t t) {
 
   u8g2.firstPage();
   do {
-    u8g2.setFont(u8g2_font_profont11_tr);
+    u8g2.setFont(SMALLFONT);
     u8g2.drawStr(date_x, 0, datestr);
     //u8g2.setFont(u8g2_font_logisoso34_tn);
     u8g2.setFont(CalBlk36);
