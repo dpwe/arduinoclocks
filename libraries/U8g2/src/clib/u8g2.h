@@ -3353,7 +3353,9 @@ extern const uint8_t u8g2_font_px437wyse700b_mf[] U8G2_FONT_SECTION("u8g2_font_p
 extern const uint8_t u8g2_font_px437wyse700b_mr[] U8G2_FONT_SECTION("u8g2_font_px437wyse700b_mr");
 extern const uint8_t u8g2_font_px437wyse700b_mn[] U8G2_FONT_SECTION("u8g2_font_px437wyse700b_mn");
 
-extern const uint8_t CalBlk36[3364] U8G2_FONT_SECTION("CalBlk36");
+extern const uint8_t CalBlk36[] U8G2_FONT_SECTION("CalBlk36");
+extern const uint8_t System5x7[] U8G2_FONT_SECTION("System5x7");
+
 
 
 /* end font list */
