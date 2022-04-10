@@ -186,7 +186,7 @@ void push_data(uint8_t new_data, int new_time) {
 }
 
 int last_log_time = 0;
-const int log_interval = 1;  // Minutes between each logged value.
+const int log_interval = 12;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
 
 void update_logger(int data_val, int data_time) {
   if (data_time >= last_log_time + log_interval) {
