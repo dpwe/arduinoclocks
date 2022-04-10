@@ -1,5 +1,7 @@
 /*
  *  u8g2_clock based on glcd_clock.
+ *  This version includes datalogging
+ *  Currently just using the DS3231 temp sensor.
  *  
  * Wiring:
  * 
@@ -95,6 +97,10 @@ bool update_RTC(void) {
   return handled_interrupt;
 }
 
+int rtc_temp_F(void) {
+  return (int)round(rtc.getTemperature() * 1.8 + 32.0);
+}
+
 // --------------------------
 // Time formatting
 // --------------------------
@@ -121,6 +127,77 @@ void serial_print_tm(const tmElements_t &tm)
   Serial.print(":");
   printDigits(tm.Second);
   Serial.println();
+}
+
+// -------------------
+// Logger
+// -------------------
+
+const int log_data_len = 116;
+uint8_t log_data[log_data_len];
+int log_times[log_data_len];
+int data_min = 70;
+int data_max = 75;
+
+void init_data(int init_val, int init_time) {
+  for (int i = 0; i < log_data_len; ++i) {
+    log_data[i] = init_val;
+    log_times[i] = init_time;
+  }
+  set_min_max(log_data, log_data_len, &data_min, &data_max);
+}
+
+void set_min_max(uint8_t *log_data, int log_data_len, int *pdata_min, int *pdata_max) {
+  int data_min = log_data[0];
+  int data_max = log_data[0];
+  for (int i = 0; i < log_data_len; ++i) {
+    int new_data = log_data[i];
+    if (new_data < data_min) data_min = new_data;
+    if (new_data > data_max) data_max = new_data;
+  }
+  // Ensure there's a nonzero range in the data.
+  *pdata_min = min(data_min, data_max - 1);
+  *pdata_max = max(data_max, data_min + 1);
+}
+
+void push_data(uint8_t new_data, int new_time) {
+  // Move forward data
+  Serial.print("new_data: ");
+  Serial.println(new_data);
+  for (int i = 0; i < log_data_len - 1; ++i) {
+    log_data[i] = log_data[i + 1];
+    log_times[i] = log_times[i + 1];
+  }
+  log_data[log_data_len - 1] = new_data;
+  log_times[log_data_len - 1] = new_time;
+  // Reset the min/max limits based on current data.
+  set_min_max(log_data, log_data_len, &data_min, &data_max);
+}
+
+int last_log_time = 0;
+const int log_interval = 1;  // Minutes between each logged value.
+bool logger_initialized = false;
+
+void update_logger(int data_val, int data_time) {
+  if (data_time >= last_log_time + log_interval) {
+    // Time to log a new value.
+    last_log_time = data_time;
+    if (!logger_initialized) {
+      init_data(data_val, data_time);
+      logger_initialized = true;
+    }
+    // Record new temperature every minute.
+    push_data(data_val, data_time);
+  }
+}
+
+void setup_logger(int data_val) {
+  // Called during power up.  Clear logger to current time, value.
+  // Figure current mins_within_day.
+  tmElements_t tm;
+  breakTime(now_local(), tm);
+  int mins_within_day = 60 * tm.Hour + tm.Minute;
+  update_logger(data_val, mins_within_day);
 }
 
 //------------------------
@@ -172,6 +249,83 @@ char *sprint_int2(char *s, uint8_t n)
   return s;
 }
 
+char *sprint_int(char *s, int n, int decimal_place=0)
+{ // Print a signed int as may places as needed. 
+  // returns next char* to write to string.
+  // If decimal place > 0, assumed passed int is value * 10**decimal_place
+  // and print a decimal place.
+  if (n < 0) {
+    *s++ = '-';
+    n = -n;
+  }
+  if (n > 9 || decimal_place > 0) {
+     s = sprint_int(s, n / 10, decimal_place - 1);
+  }
+  if (decimal_place == 1) {
+    *s++ = '.';
+  }
+  *s++ = '0' + (n % 10);
+  return s;
+}
+
+int y_offset_per_data(int data_y, int mid_y) {
+    if (data_y > mid_y) {
+    return -7;  // Line is in lower half; label above final point.
+  } else {
+    return 1;   // Line is in upper half; label below final point.
+  }
+}
+
+void draw_time(int x, int y, int day_mins) {
+  // Plot a time as HH:MM using tiny font.
+  char str[3];
+  *(sprint_int2(str, day_mins / 60)) = '\0';
+  u8g2.drawStr(x, y, str);  
+  *(sprint_int2(str, day_mins % 60)) = '\0';
+  u8g2.drawStr(x + 2 * 4 + 2, y, str);   // Over by 2 chr + 2 px for colon.
+  // Add colon.
+  u8g2.drawPixel(x + 2 * 4, y + 2);
+  u8g2.drawPixel(x + 2 * 4, y + 4);  
+}
+
+void draw_log_output(int x, int y, int w, int h) {
+  // Figure scaling
+  const int legend_w = 12; // for 3 digits in 4x6 cells.
+  uint8_t data_x = x + legend_w;
+  uint8_t data_w = w - legend_w;
+  int data_scale = (h - 1) * 256 / (data_max - data_min);
+  uint8_t last_x = data_x;
+  uint8_t last_y = y;
+  uint8_t last_data = 0;
+  uint8_t first_y = 0;
+  for (int i = 0; i < log_data_len; ++i) {
+    last_data = log_data[i];
+    int new_y = y + (h - 1) - ((data_scale * (last_data - data_min)) >> 8);
+    int new_x = data_x + (i * (data_w - 1) / (log_data_len - 1));
+    if (i > 0) {
+      u8g2.drawLine(last_x, last_y, new_x, new_y);
+    }
+    last_x = new_x;
+    last_y = new_y;
+    if (i == 0) first_y = new_y;  // Needed to position earliest timestamp below.
+  }
+  // Label current value
+  u8g2.setFont(u8g2_font_micro_tn);
+  char legend_str[6];
+  int mid_y = (y + h / 2);
+  int y_offset = y_offset_per_data(last_y, mid_y);
+  *(sprint_int(legend_str, last_data)) = '\0';
+  u8g2.drawStr(last_x - 4 * strlen(legend_str) + 2, last_y + y_offset, legend_str);  // Font is 4 pixels wide.
+  // Add legend at left
+  *(sprint_int(legend_str, data_max)) = '\0';
+  u8g2.drawStr(x, y, legend_str);
+  *(sprint_int(legend_str, data_min)) = '\0';
+  u8g2.drawStr(x, y + h - 6, legend_str);  // Font is 6 pixels high.
+  // Add time of earliest point.
+  y_offset = y_offset_per_data(first_y, mid_y);
+  draw_time(data_x, first_y + y_offset, log_times[0]);  
+}
+
 uint8_t last_day = 0;
 uint8_t colon_visible = true;
 
@@ -198,7 +352,7 @@ int update_display(time_t t) {
   min_string[2] = '\0';
 
   // Big digits layout
-  const int time_y = 14;
+  const int time_y = 9;
   int colon_x = mid_x - (big_colon_width >> 1) - 4;  // Manual fix
   int minute_x = colon_x + big_colon_width;
   int hour_x = colon_x - u8g2.getStrWidth(hr_string);
@@ -208,7 +362,7 @@ int update_display(time_t t) {
   // Seconds bar dimensions
   const uint8_t x_scale = 2;
   const uint8_t height = 4;
-  const uint8_t base_y = 58;
+  const uint8_t base_y = 40;
   const uint8_t base_x = mid_x - x_scale * 30;
   // Bar width goes from 1 to 60 (instead of 0 to 59)
   uint8_t bar_left, bar_width;
@@ -222,8 +376,16 @@ int update_display(time_t t) {
     bar_width = (60 - tm.Second) * x_scale;
   }
 
+  // Logging plot setup
+  const int log_x = 0;
+  const int log_y = base_y + 8;
+  const int log_w = 128;
+  const int log_h = 64 - log_y;
+
   u8g2.firstPage();
   do {
+    // Logging first, since it changes the font.
+    draw_log_output(log_x, log_y, log_w, log_h);
     // Date.
     u8g2.setFont(SMALLFONT);
     u8g2.drawStr(date_x, 0, datestr);
@@ -234,7 +396,7 @@ int update_display(time_t t) {
     if (colon_visible) {
       u8g2.drawStr(colon_x, time_y, ":");
     }
-    //  Seconds progress bar.
+    // Seconds progress bar.
     // Box around the second progress bar, 1 pixel separated.
     u8g2.drawFrame(base_x - 2, base_y - 2, 60 * x_scale + 4, 8);
     // Draw/undraw transition occurs on second 1.  Second 0 is drawing the 60th tick on the line.
@@ -299,12 +461,13 @@ void setup()
 {
   Wire.begin();
   Serial.begin(9600);
-  Serial.println("u8g2_clock");
+  Serial.println("u8g2_clock_logger");
 
   setup_RTC();
   setup_interrupts();
   setup_display();
   setup_backlight();
+  setup_logger(rtc_temp_F());
 }
 
 time_t current_now = 0;
@@ -313,7 +476,8 @@ void loop()
 {
   if (update_RTC()) {
     current_now = now_local();
-    update_display(current_now);
+    int mins_within_day = update_display(current_now);
+    update_logger(rtc_temp_F(), mins_within_day);
   }
   update_backlight(hour(current_now));
 }
