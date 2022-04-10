@@ -133,27 +133,38 @@ void serial_print_tm(const tmElements_t &tm)
 // Logger
 // -------------------
 
-const int log_data_len = 116;
+const int log_data_len = 120;
 uint8_t log_data[log_data_len];
 int log_times[log_data_len];
 int data_min = 70;
 int data_max = 75;
+
+#define INVALID_TIME (-1)
 
 void init_data(int init_val, int init_time) {
   for (int i = 0; i < log_data_len; ++i) {
     log_data[i] = init_val;
     log_times[i] = init_time;
   }
-  set_min_max(log_data, log_data_len, &data_min, &data_max);
+  set_min_max(log_data, log_times, log_data_len, &data_min, &data_max);
 }
 
-void set_min_max(uint8_t *log_data, int log_data_len, int *pdata_min, int *pdata_max) {
-  int data_min = log_data[0];
-  int data_max = log_data[0];
+void set_min_max(uint8_t *log_data, int *data_valid, int log_data_len, int *pdata_min, int *pdata_max) {
+  int data_min = 0;
+  int data_max = 0;
+  bool seen_valid_data = false;
   for (int i = 0; i < log_data_len; ++i) {
-    int new_data = log_data[i];
-    if (new_data < data_min) data_min = new_data;
-    if (new_data > data_max) data_max = new_data;
+    if (data_valid[i] != INVALID_TIME) {
+      int new_data = log_data[i];
+      if (seen_valid_data) {
+        data_min = min(data_min, new_data);
+        data_max = max(data_max, new_data);
+      } else {
+        data_min = new_data;
+        data_max = new_data;
+        seen_valid_data = true;
+      }
+    }
   }
   // Ensure there's a nonzero range in the data.
   *pdata_min = min(data_min, data_max - 1);
@@ -171,33 +182,24 @@ void push_data(uint8_t new_data, int new_time) {
   log_data[log_data_len - 1] = new_data;
   log_times[log_data_len - 1] = new_time;
   // Reset the min/max limits based on current data.
-  set_min_max(log_data, log_data_len, &data_min, &data_max);
+  set_min_max(log_data, log_times, log_data_len, &data_min, &data_max);
 }
 
 int last_log_time = 0;
 const int log_interval = 1;  // Minutes between each logged value.
-bool logger_initialized = false;
 
 void update_logger(int data_val, int data_time) {
   if (data_time >= last_log_time + log_interval) {
     // Time to log a new value.
     last_log_time = data_time;
-    if (!logger_initialized) {
-      init_data(data_val, data_time);
-      logger_initialized = true;
-    }
     // Record new temperature every minute.
     push_data(data_val, data_time);
   }
 }
 
-void setup_logger(int data_val) {
+void setup_logger(void) {
   // Called during power up.  Clear logger to current time, value.
-  // Figure current mins_within_day.
-  tmElements_t tm;
-  breakTime(now_local(), tm);
-  int mins_within_day = 60 * tm.Hour + tm.Minute;
-  update_logger(data_val, mins_within_day);
+  init_data(0, INVALID_TIME);
 }
 
 //------------------------
@@ -268,9 +270,12 @@ char *sprint_int(char *s, int n, int decimal_place=0)
   return s;
 }
 
+#define SMALL_TEXT_H  (6)
+#define SMALL_TEXT_W  (4)
+
 int y_offset_per_data(int data_y, int mid_y) {
-    if (data_y > mid_y) {
-    return -7;  // Line is in lower half; label above final point.
+    if (data_y >= mid_y) {
+    return -(SMALL_TEXT_H + 1);  // Line is in lower half; label above final point.
   } else {
     return 1;   // Line is in upper half; label below final point.
   }
@@ -282,48 +287,64 @@ void draw_time(int x, int y, int day_mins) {
   *(sprint_int2(str, day_mins / 60)) = '\0';
   u8g2.drawStr(x, y, str);  
   *(sprint_int2(str, day_mins % 60)) = '\0';
-  u8g2.drawStr(x + 2 * 4 + 2, y, str);   // Over by 2 chr + 2 px for colon.
+  u8g2.drawStr(x + 2 * SMALL_TEXT_W + 2, y, str);   // Over by 2 chr + 2 px for colon.
   // Add colon.
-  u8g2.drawPixel(x + 2 * 4, y + 2);
-  u8g2.drawPixel(x + 2 * 4, y + 4);  
+  u8g2.drawPixel(x + 2 * SMALL_TEXT_W, y + 2);
+  u8g2.drawPixel(x + 2 * SMALL_TEXT_W, y + 4);  
 }
 
 void draw_log_output(int x, int y, int w, int h) {
   // Figure scaling
-  const int legend_w = 12; // for 3 digits in 4x6 cells.
+  const int legend_w = 3 * SMALL_TEXT_W; // for legends up to 3 digits.
   uint8_t data_x = x + legend_w;
   uint8_t data_w = w - legend_w;
   int data_scale = (h - 1) * 256 / (data_max - data_min);
-  uint8_t last_x = data_x;
+  uint8_t last_x;
+  bool last_x_valid = false;
   uint8_t last_y = y;
   uint8_t last_data = 0;
+  uint8_t first_x = 0;
   uint8_t first_y = 0;
+  int first_time = INVALID_TIME;
   for (int i = 0; i < log_data_len; ++i) {
     last_data = log_data[i];
-    int new_y = y + (h - 1) - ((data_scale * (last_data - data_min)) >> 8);
-    int new_x = data_x + (i * (data_w - 1) / (log_data_len - 1));
-    if (i > 0) {
-      u8g2.drawLine(last_x, last_y, new_x, new_y);
+    if (log_times[i] != INVALID_TIME) {
+      int new_y = y + (h - 1) - ((data_scale * (last_data - data_min)) >> 8);
+      int new_x = data_x + (i * (data_w - 1) / (log_data_len - 1));
+      if (last_x_valid) {
+        u8g2.drawLine(last_x, last_y, new_x, new_y);
+      }
+      last_x = new_x;
+      last_y = new_y;
+      last_x_valid = true;
+      if (first_time == INVALID_TIME) {
+        first_time = log_times[i];
+        first_x = last_x;
+        first_y = last_y;  // Needed to position earliest timestamp below.
+      }
     }
-    last_x = new_x;
-    last_y = new_y;
-    if (i == 0) first_y = new_y;  // Needed to position earliest timestamp below.
   }
-  // Label current value
+  // Text labels.
   u8g2.setFont(u8g2_font_micro_tn);
   char legend_str[6];
   int mid_y = (y + h / 2);
-  int y_offset = y_offset_per_data(last_y, mid_y);
-  *(sprint_int(legend_str, last_data)) = '\0';
-  u8g2.drawStr(last_x - 4 * strlen(legend_str) + 2, last_y + y_offset, legend_str);  // Font is 4 pixels wide.
-  // Add legend at left
+  // Do we have some actual data?
+  if (last_x_valid) {
+    // Label current value
+    int y_offset = y_offset_per_data(last_y, mid_y);
+    *(sprint_int(legend_str, last_data)) = '\0';
+    u8g2.drawStr(last_x - SMALL_TEXT_W * strlen(legend_str) + 2, last_y + y_offset, legend_str);
+    // Add time of earliest point.
+    // Bias time to be below if it's at the mid point so that it might miss the current value.
+    y_offset = y_offset_per_data(first_y - 1, mid_y);
+    // Make sure time stays on-screen.
+    draw_time(min(first_x, x + w - (4*SMALL_TEXT_W + 1)), first_y + y_offset, first_time);  
+  }
+  // Add legend at left.
   *(sprint_int(legend_str, data_max)) = '\0';
   u8g2.drawStr(x, y, legend_str);
   *(sprint_int(legend_str, data_min)) = '\0';
-  u8g2.drawStr(x, y + h - 6, legend_str);  // Font is 6 pixels high.
-  // Add time of earliest point.
-  y_offset = y_offset_per_data(first_y, mid_y);
-  draw_time(data_x, first_y + y_offset, log_times[0]);  
+  u8g2.drawStr(x, y + h - SMALL_TEXT_H, legend_str);  // Font is 6 pixels high.
 }
 
 uint8_t last_day = 0;
@@ -467,7 +488,7 @@ void setup()
   setup_interrupts();
   setup_display();
   setup_backlight();
-  setup_logger(rtc_temp_F());
+  setup_logger();
 }
 
 time_t current_now = 0;
