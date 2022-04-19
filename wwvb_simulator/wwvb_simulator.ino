@@ -11,8 +11,22 @@
 // adding PB1 and PB2 (e.g. with 1k to PB2 and 10k to PB1, so the modulation is deep) we get
 // the voltage to feed to the antenna.
 
+// We set up a table of 60 values indicating the symbol (quiet-part duty cycle) for each second
+// of the 1-minute loop. As the (external) clock starts a new second, it sets the start_frame_request
+// semaphore.  This causes the TimerOverflow interrupt routine to begin counting cycles (and clear the 
+// 60 kHz output).  Then it counts up tenths of a second, and when it hits the duty_phase, it turns 
+// the carrier back on.
+//
+// Outside of that interrupt routine, the main routine waits for 1 Hz events, and sets up duty_phase then 
+// sets ths start_frame_request semaphore.  This starts off the next 1-second frame of transmission.
+
+// In this version, the 1PPS events (and the time to set) come from a DS3231 wired to the A4/A5 I2S.
+// The DS3231's SQWV output is set to 1Hz PPS and connected to D3 (which supports interrpts on Arduino).
+
 // Pin that goes high for a second at the start of each minute, just for debugging.
 const uint8_t frame_pin = 12;
+// Pin that is connected to the SQWV output of the DS3231 RTC (to get 1PPS interrupts).
+const uint8_t sqwPin = 3;  // Pin3 is interrupt-capable on Arduino Nano.
 
 // ==========================
 // 60 kHz output
@@ -48,31 +62,44 @@ void setup_60kHz(void) {
 // See
 // /Users/dpwe/Library/Arduino15/packages/arduino/tools/avr-gcc/7.3.0-atmel3.6.1-arduino7/bin/avr-objdump -d /var/folders/_w/z80db8m163q5jtt95yc1wgqh0000gq/T/arduino_build_54692/wwvb_simulator.ino.elf
 
-const unsigned int rf_cycles_per_sec = 59925;
-unsigned int rf_cycles_per_duty = long(59925 * 0.8);  // Changed every second to achieve data modulation.
-unsigned int rf_cycle_count = 0;
+volatile uint8_t start_frame_request = 0;
+
+uint8_t duty_phase = 5;  // Carrier restarts at this many tenths of a sec.  Changed every second to achieve data modulation.
+uint8_t frame_phase = 0;  // Count of 1/10ths of a second
+//unsigned int rf_cycle_count = 0;
+// Break cycle count into two bytes for optimization
+uint8_t rf_cycle_count_lo = 0;
+uint8_t rf_cycle_count_hi = 24;  // Counts to 24 * 256 = 6144 cycles, so preset to count down every ~0.1 sec
 
 #define LED PB5  // Arduino pin13 == LED
 
-// Semaphore/index for stepping through symbols.
-volatile uint8_t symbol_index = 0;
-
 ISR(TIMER1_OVF_vect) {
   TIFR1 = 0x00;         // Timer1 INT Flag Reg: Clear Timer Overflow Interrupt
-  rf_cycle_count++;
-  if (rf_cycle_count == rf_cycles_per_duty) {
-    // Turn on the 60 kHz.
-    OCR1B = 133;
-    PORTB |= (1 << LED);  // Light LED
-  } else if (rf_cycle_count == rf_cycles_per_sec) {
-    rf_cycle_count = 0;
-    // 1PPS event.
+  if (start_frame_request) {
+    // We were instructed to start a new 1 sec frame.
+    start_frame_request = 0;
+    // Ensure counter is starting from zero
+    frame_phase = 0;
+    rf_cycle_count_lo = 0;
+    rf_cycle_count_hi = 24;  // 24 * 256 = 6144, close to 6000 = 100ms @ 60 kHz
+    // Always stop transmission at start of second.
     OCR1B = 300;  // Stop the 60 kHz (it's larger than ICR1, so never reached).
     PORTB &= ~(1 << LED);  // Clear LED
-    PORTB &= ~(1 << PB4);  // Clear frame signal (only set at start of 0th second).
-    // Set semaphore to indicate that rf_cycles_per_duty should be updated, but let that happen outside interrupt.
-    // We have at least 0.2 sec to fix it.
-    ++symbol_index;
+  } else {
+    ++rf_cycle_count_lo;
+    if (rf_cycle_count_lo == 0) {
+      --rf_cycle_count_hi;
+      if (rf_cycle_count_hi == 0) {
+        rf_cycle_count_hi = 24;  // 24 * 256 = 6144, close to 6000 = 100ms @ 60 kHz
+        ++frame_phase;
+        PORTB &= ~(1 << PB4);  // Clear frame signal (only set at start of 0th second).
+        if (frame_phase == duty_phase) {
+          // Turn on the 60 kHz.
+          OCR1B = 133;
+          PORTB |= (1 << LED);  // Light LED
+        }
+      }
+    }
   }
 }
 
@@ -80,32 +107,30 @@ ISR(TIMER1_OVF_vect) {
 // RTC
 // ============================
 #include "RTClib.h"
-RTC_Millis rtc;
 
-// Function to return the compile date and time as a time_t value
-class DateTime compileTime(void)
+volatile uint8_t pending_rtc_interrupt = 0;
+void rtc_mark_isr(void)
 {
-    const char *compDate = __DATE__, *compTime = __TIME__, *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    char chMon[3], *m;
-
-    strncpy(chMon, compDate, 3);
-    chMon[3] = '\0';
-    m = strstr(months, chMon);
-    uint8_t month = ((m - months) / 3 + 1);
-    uint8_t day = atoi(compDate + 4);
-    uint16_t year = atoi(compDate + 7) - 1970;
-    uint8_t hour = atoi(compTime);
-    uint8_t minute = atoi(compTime + 3);
-    uint8_t second = atoi(compTime + 6);
-
-    return DateTime(year, month, day, hour, minute, second);
+  pending_rtc_interrupt = 1;
 }
 
-void setup_rtc(void){
-  Serial.print(__DATE__);
-  Serial.println(__TIME__);
-  rtc.begin(compileTime());
+void setup_interrupts() {
+  // DS3231 is on falling edge.
+  attachInterrupt(digitalPinToInterrupt(sqwPin), rtc_mark_isr, FALLING);
 }
+
+RTC_DS3231 rtc;
+
+void setup_rtc(void) {
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    Serial.flush();
+    abort();
+  }
+  rtc.writeSqwPinMode(DS3231_SquareWave1Hz); // Place SQW pin into 1 Hz mode
+  pinMode(sqwPin, INPUT_PULLUP); // Set alarm pin as pullup
+}
+
 
 // ============================
 // Time Formatting
@@ -167,15 +192,16 @@ const uint8_t ZERO = 0;
 const uint8_t ONE = 1;
 const uint8_t MARK = 2;
 
-// Table that maps Symbol type into count of for low energy
-// ZERO = 0.2 s = (0.2 * 60,000) cycles = 12000 cycles
-// ONE  = 0.5 s = (0.5 * 60,000) cycles = 30000 cycles
-// MARK = 0.8 s = (0.8 * 60,000) cycles = 48000 cycles
-const unsigned int low_cycles[] = { 11985, 29963, 47940 };
+// Table that maps Symbol type into tenth-second counts for low energy
+// ZERO = 0.2 s
+// ONE  = 0.5 s
+// MARK = 0.8 s
+const uint8_t duty_tenths[] = { 2, 5, 8 };
 
 // Table of symbols for each second in the 1-minute message.
 const uint8_t symbols_len = 60;
-byte symbols[symbols_len];
+uint8_t symbols[symbols_len];
+uint8_t symbol_index = 0;
 
 void setup_symbols(void) {
   for(int i = 0; i < symbols_len; ++i) {
@@ -183,30 +209,18 @@ void setup_symbols(void) {
   }
 }
 
-void update_duty_cycle(void) {
-  // symbol_index has been incremented by interrupt routine.  Update the duty cycle.
+void next_second(void) {
+  // RTC says another second has happened.
+  // Setup for the next symbol's duty cycle.
+  duty_phase = duty_tenths[symbols[symbol_index]];
+  // Set the flag to tell the 60 kHz oscillator to start a new frame.
+  start_frame_request = 1;
+  // Update the symbol table reader
+  ++symbol_index;
   if (symbol_index == symbols_len) {
     // Reached end of table, go back to start
     symbol_index = 0;
-    PORTB |= (1 << PB4);   // Set frame flag
-  }
-  rf_cycles_per_duty = low_cycles[symbols[symbol_index]];
-}
-
-uint8_t last_symbol_index = 0;
-
-void update_symbols(void) {
-  if (symbol_index != last_symbol_index) {
-    last_symbol_index = symbol_index;
-    update_duty_cycle();  // Will wrap symbol_index to zero when needed.
-    if (symbol_index == 0) {
-      // Update the symbols for the current minute.
-      // Since the first symbol is always the same (MARK), we have at least 1 second to finish this.
-      DateTime dt = rtc.now();
-      set_timecode(dt);
-      char time_str[20];
-      Serial.println(sprint_datetime(time_str, dt));  
-    }
+    //PORTB |= (1 << PB4);   // Set frame flag
   }
 }
 
@@ -274,12 +288,12 @@ static uint16_t date2days(uint16_t y, uint8_t m, uint8_t d) {
   return days + 365 * y + (y + 3) / 4 - 1;
 }
 
-uint16_t day_of_year(DateTime& dt) {
+uint16_t day_of_year(class DateTime& dt) {
   // Count of days since jan 1st; jan 1st = 1.
   return 1 + date2days(dt.year(), dt.month(), dt.day()) - date2days(dt.year(), 1, 1);
 }
 
-void set_timecode(DateTime& dt) {
+void set_timecode(class DateTime& dt) {
   // Update the timecode for the given date.
   set_bcd(dt.minute(), symbols + 1, 7);
   set_bcd(dt.hour(), symbols + 12, 6);
@@ -287,6 +301,43 @@ void set_timecode(DateTime& dt) {
   set_bcd(dt.year() % 100, symbols + 45, 8);
   // Leap year flag.
   symbols[55] = (dt.year() % 4) == 0;
+}
+
+void print_timecode(void) {
+  // Print out all the symbols to Serial.
+  for (int i = 0; i < 60; ++i) {
+    if (symbols[i] == ZERO)      Serial.print("0");
+    else if (symbols[i] == ONE)  Serial.print("1");
+    else if (symbols[i] == MARK) Serial.print("-");
+    else Serial.print("?");
+    if ((i % 20) == 19) Serial.println();
+  }
+}
+// ==================================
+// Handle 1PPS update
+// ==================================
+
+void update_rtc(void) {
+  if (pending_rtc_interrupt) {
+    pending_rtc_interrupt = 0;
+    // Read back the time.
+    DateTime dt = rtc.now();
+    if (dt.second() == 0) {
+      // Update symbols for the new minute.  This will update before the modulator reads them.
+      set_timecode(dt);
+      print_timecode();
+      // Reset the 60 second cycle.
+      symbol_index = 0;
+      // Set the cycle-start semaphore (will be cleared after 0.1 sec)
+      PORTB |= (1 << PB4); 
+      // Report to terminal
+      char time_str[20];
+      Serial.println(sprint_datetime(time_str, dt));  
+    }
+    // Update the duty cycle and start the next frame.
+    // (This is kinda late if we do the Serial.print before it...)
+    next_second();
+  }
 }
 
 // ============================
@@ -310,11 +361,12 @@ void setup() {
   digitalWrite(frame_pin, LOW);
 
   setup_rtc();
+  setup_interrupts();
   setup_symbols();
   setup_timecode();
   setup_60kHz();
 }
 
 void loop() {
-  update_symbols();
+  update_rtc();
 }
