@@ -50,8 +50,8 @@ void setup_60kHz(void) {
   ICR1 = 266;
   OCR1A = 133; // by default, 50% (134/267) duty
   OCR1B = 133; // by default, 50% (134/267) duty
-  DDRB |= (1 << PB1); // set PB1 = OCR1A = Pin10 to an output port
-  DDRB |= (1 << PB2); // set PB2 = OCR1B = Pin9 to an output port
+  DDRB |= (1 << PB1); // set PB1 = OCR1A = Pin9 to an output port
+  DDRB |= (1 << PB2); // set PB2 = OCR1B = Pin10 to an output port
   // Enable overflow interrupts
   TIFR1  = 0x00;        // Timer1 INT Flag Reg: Clear Timer Overflow Flag
   TIMSK1 = (1 << TOIE1);        // Timer1 INT Reg: Timer1 Overflow Interrupt Enable
@@ -66,6 +66,7 @@ volatile uint8_t start_frame_request = 0;
 
 uint8_t duty_phase = 5;  // Carrier restarts at this many tenths of a sec.  Changed every second to achieve data modulation.
 uint8_t frame_phase = 0;  // Count of 1/10ths of a second
+uint8_t invert_phase = 0;  // Flag to invert phase.  Updated at 0.1 sec.
 //unsigned int rf_cycle_count = 0;
 // Break cycle count into two bytes for optimization
 uint8_t rf_cycle_count_lo = 0;
@@ -84,6 +85,7 @@ ISR(TIMER1_OVF_vect) {
     rf_cycle_count_hi = 24;  // 24 * 256 = 6144, close to 6000 = 100ms @ 60 kHz
     // Always stop transmission at start of second.
     OCR1B = 300;  // Stop the 60 kHz (it's larger than ICR1, so never reached).
+    DDRB &= ~(1 << PB2); // Set PB2 (OC1B) to input, i.e. stop driving
     PORTB &= ~(1 << LED);  // Clear LED
   } else {
     ++rf_cycle_count_lo;
@@ -93,9 +95,20 @@ ISR(TIMER1_OVF_vect) {
         rf_cycle_count_hi = 24;  // 24 * 256 = 6144, close to 6000 = 100ms @ 60 kHz
         ++frame_phase;
         PORTB &= ~(1 << PB4);  // Clear frame signal (only set at start of 0th second).
+        if (frame_phase == 1) {
+          // This is when we change the 60 kHz phase.
+          if (invert_phase) {
+            // Table 15.3: Set both OC1A and OC1B to Inverting mode (FastPWM) (Also set bottom WGM bits for FastPWM).
+            TCCR1A = (1 << COM1A1) | (1 << COM1A0) |(1 << COM1B1) | (1 << COM1B0) | (1 << WGM11) | (0 << WGM10);
+          } else {
+            // Table 15.3: Set both OC1A and OC1B to Non-inverting mode (FastPWM)
+            TCCR1A = (1 << COM1A1) | (0 << COM1A0) |(1 << COM1B1) | (0 << COM1B0) | (1 << WGM11) | (0 << WGM10);                      
+          }
+        }
         if (frame_phase == duty_phase) {
           // Turn on the 60 kHz.
           OCR1B = 133;
+          DDRB |= (1 << PB2); // set PB2 = OC1B = Pin10 to an output port
           PORTB |= (1 << LED);  // Light LED
         }
       }
@@ -112,6 +125,8 @@ volatile uint8_t pending_rtc_interrupt = 0;
 void rtc_mark_isr(void)
 {
   pending_rtc_interrupt = 1;
+  // Immediately sync the 60 kHz cycles, hope rest of the processing will catch up before it matters.
+  start_frame_request = 1;
 }
 
 void setup_interrupts() {
@@ -213,8 +228,15 @@ void next_second(void) {
   // RTC says another second has happened.
   // Setup for the next symbol's duty cycle.
   duty_phase = duty_tenths[symbols[symbol_index]];
+  // Set phase as well; copy duty for now
+  if (symbols[symbol_index] == ONE) {
+    invert_phase = 0;
+  } else {
+    invert_phase = 1;
+  }
   // Set the flag to tell the 60 kHz oscillator to start a new frame.
-  start_frame_request = 1;
+  //start_frame_request = 1;
+  // This is now done inside the PPS interrupt handler for low latency.
   // Update the symbol table reader
   ++symbol_index;
   if (symbol_index == symbols_len) {
@@ -332,10 +354,12 @@ void update_rtc(void) {
       PORTB |= (1 << PB4); 
       // Report to terminal
       char time_str[20];
-      Serial.println(sprint_datetime(time_str, dt));  
+      //Serial.println(sprint_datetime(time_str, dt));  
     }
     // Update the duty cycle and start the next frame.
     // (This is kinda late if we do the Serial.print before it...)
+    // Total latency from 1PPS edge to 60 kHz stop is 1.108 ms, regardless of Serial.println
+    // With direct setting of start_frame_request in the 1PPS interrupt, latency is < 2 cycles of 60 kHz (16..32 us)
     next_second();
   }
 }
