@@ -1,5 +1,5 @@
 // wwvb_simulator
-// 
+//
 // Generate modulated 60 kHz signal
 // to feed WWVB receivers
 
@@ -13,11 +13,11 @@
 
 // We set up a table of 60 values indicating the symbol (quiet-part duty cycle) for each second
 // of the 1-minute loop. As the (external) clock starts a new second, it sets the start_frame_request
-// semaphore.  This causes the TimerOverflow interrupt routine to begin counting cycles (and clear the 
-// 60 kHz output).  Then it counts up tenths of a second, and when it hits the duty_phase, it turns 
+// semaphore.  This causes the TimerOverflow interrupt routine to begin counting cycles (and clear the
+// 60 kHz output).  Then it counts up tenths of a second, and when it hits the duty_phase, it turns
 // the carrier back on.
 //
-// Outside of that interrupt routine, the main routine waits for 1 Hz events, and sets up duty_phase then 
+// Outside of that interrupt routine, the main routine waits for 1 Hz events, and sets up duty_phase then
 // sets ths start_frame_request semaphore.  This starts off the next 1-second frame of transmission.
 
 // In this version, the 1PPS events (and the time to set) come from a DS3231 wired to the A4/A5 I2S.
@@ -38,7 +38,7 @@ void setup_60kHz(void) {
   // CS1{2:0} = 0b001 => Prescaler is 16 MHz / 1
   // initialize non-inverting fast PWM on OC1B (PB2, Arduino Pin 10) and OC1A (PB1, Arduino Pin 9)
   // count from BOTTOM to ICR1 (mode 14), using /1 prescaler
-  TCCR1A = (1 << COM1A1) | (0 << COM1A0) |(1 << COM1B1) | (0 << COM1B0) | (1 << WGM11) | (0 << WGM10);
+  TCCR1A = (1 << COM1A1) | (0 << COM1A0) | (1 << COM1B1) | (0 << COM1B0) | (1 << WGM11) | (0 << WGM10);
   TCCR1B = (1 << WGM13) | (1 << WGM12) | (0 << CS12) | (0 << CS11) | (1 << CS10);
   // fast PWM:
   // f = f_clk / (N * (1 + TOP)), where N is the prescaler divider
@@ -66,7 +66,7 @@ volatile uint8_t start_frame_request = 0;
 
 uint8_t duty_phase = 5;  // Carrier restarts at this many tenths of a sec.  Changed every second to achieve data modulation.
 uint8_t frame_phase = 0;  // Count of 1/10ths of a second
-uint8_t invert_phase = 0;  // Flag to invert phase.  Updated at 0.1 sec.
+uint8_t invert_phase = 0;  // Flag to invert phase.  Read at 0.1 sec past the second.
 //unsigned int rf_cycle_count = 0;
 // Break cycle count into two bytes for optimization
 uint8_t rf_cycle_count_lo = 0;
@@ -99,10 +99,10 @@ ISR(TIMER1_OVF_vect) {
           // This is when we change the 60 kHz phase.
           if (invert_phase) {
             // Table 15.3: Set both OC1A and OC1B to Inverting mode (FastPWM) (Also set bottom WGM bits for FastPWM).
-            TCCR1A = (1 << COM1A1) | (1 << COM1A0) |(1 << COM1B1) | (1 << COM1B0) | (1 << WGM11) | (0 << WGM10);
+            TCCR1A = (1 << COM1A1) | (1 << COM1A0) | (1 << COM1B1) | (1 << COM1B0) | (1 << WGM11) | (0 << WGM10);
           } else {
             // Table 15.3: Set both OC1A and OC1B to Non-inverting mode (FastPWM)
-            TCCR1A = (1 << COM1A1) | (0 << COM1A0) |(1 << COM1B1) | (0 << COM1B0) | (1 << WGM11) | (0 << WGM10);                      
+            TCCR1A = (1 << COM1A1) | (0 << COM1A0) | (1 << COM1B1) | (0 << COM1B0) | (1 << WGM11) | (0 << WGM10);
           }
         }
         if (frame_phase == duty_phase) {
@@ -151,8 +151,8 @@ void setup_rtc(void) {
 // Time Formatting
 // ============================
 
-char *sprint_int(char *s, int n, int decimal_place=0)
-{ // Print a signed int as may places as needed. 
+char *sprint_int(char *s, int n, int decimal_place = 0)
+{ // Print a signed int as may places as needed.
   // returns next char* to write to string.
   // If decimal place > 0, assumed passed int is value * 10**decimal_place
   // and print a decimal place.
@@ -161,7 +161,7 @@ char *sprint_int(char *s, int n, int decimal_place=0)
     n = -n;
   }
   if (n > 9 || decimal_place > 0) {
-     s = sprint_int(s, n / 10, decimal_place - 1);
+    s = sprint_int(s, n / 10, decimal_place - 1);
   }
   if (decimal_place == 1) {
     *s++ = '.';
@@ -171,14 +171,14 @@ char *sprint_int(char *s, int n, int decimal_place=0)
 }
 
 char *sprint_int2(char *s, int n)
-{  // Always 2 digits, assume n nonnegative, < 99.
+{ // Always 2 digits, assume n nonnegative, < 99.
   *s++ = '0' + (n / 10);
   *s++ = '0' + (n % 10);
   return s;
 }
 
-char *sprint_datetime(char *s, DateTime &dt, bool show_date=false)
-{  // Returns full terminated string
+char *sprint_datetime(char *s, DateTime &dt, bool show_date = false)
+{ // Returns full terminated string
   char *entry_s = s;
   // s must provide 20 bytes, or 9 if just time.
   if (show_date) {
@@ -216,10 +216,11 @@ const uint8_t duty_tenths[] = { 2, 5, 8 };
 // Table of symbols for each second in the 1-minute message.
 const uint8_t symbols_len = 60;
 uint8_t symbols[symbols_len];
+uint8_t phase_bits[symbols_len];
 uint8_t symbol_index = 0;
 
 void setup_symbols(void) {
-  for(int i = 0; i < symbols_len; ++i) {
+  for (int i = 0; i < symbols_len; ++i) {
     symbols[i] = ZERO;
   }
 }
@@ -228,6 +229,8 @@ void next_second(void) {
   // RTC says another second has happened.
   // Setup for the next symbol's duty cycle.
   duty_phase = duty_tenths[symbols[symbol_index]];
+  // Setup for the next second's PSK phase.
+  invert_phase = phase_bits[symbol_index];
   // Set phase as well; copy duty for now
   if (symbols[symbol_index] == ONE) {
     invert_phase = 0;
@@ -246,21 +249,21 @@ void next_second(void) {
   }
 }
 
-// ============================
-// WWVB timecodesymbol sequence
-// ============================
+// =================================
+// WWVB AM timecodesymbol sequence
+// =================================
 
 void setup_timecode(void) {
   // Assume symbols[] is set up.
   // Fixed portions of WWVB timecode (see https://en.wikipedia.org/wiki/WWVB)
   symbols[0] = MARK;
   for (int i = 0; i < 6; ++i) {
-    symbols[10*i + 9] = MARK;
+    symbols[10 * i + 9] = MARK;
   }
   // Multiple bits are always zero, leave as initialized.
   // symbols[4, 10, 11, 14, 20, 21, 24, 34, 35, 44, 54] = ZERO.
 
-  // Dummy DUT1.  DUT1 is -0.1 sec since 2021-07-17; 
+  // Dummy DUT1.  DUT1 is -0.1 sec since 2021-07-17;
   // see https://www.nist.gov/pml/time-and-frequency-division/time-realization/leap-seconds
   // DUT sign: negative
   symbols[36] = ZERO;
@@ -284,7 +287,7 @@ uint8_t *set_bcd(uint16_t value, uint8_t *buf, uint8_t nbits) {
     nbits = 4;
     value = value % 10;
   }
-  while(nbits--) {
+  while (nbits--) {
     uint8_t test_bit = (1 << nbits);
     if (value & test_bit) {
       *buf = 1;
@@ -300,6 +303,8 @@ uint8_t *set_bcd(uint16_t value, uint8_t *buf, uint8_t nbits) {
 const uint8_t daysInMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30};
 
 static uint16_t date2days(uint16_t y, uint8_t m, uint8_t d) {
+  // Number of days since 2000/01/01.
+  // Remember, 2000 *was* a leap year, even though 2100 will not be.
   if (y >= 2000U)
     y -= 2000U;
   uint16_t days = d;
@@ -310,12 +315,12 @@ static uint16_t date2days(uint16_t y, uint8_t m, uint8_t d) {
   return days + 365 * y + (y + 3) / 4 - 1;
 }
 
-uint16_t day_of_year(class DateTime& dt) {
+uint16_t day_of_year(const class DateTime& dt) {
   // Count of days since jan 1st; jan 1st = 1.
   return 1 + date2days(dt.year(), dt.month(), dt.day()) - date2days(dt.year(), 1, 1);
 }
 
-void set_timecode(class DateTime& dt) {
+void set_timecode(const class DateTime& dt) {
   // Update the timecode for the given date.
   set_bcd(dt.minute(), symbols + 1, 7);
   set_bcd(dt.hour(), symbols + 12, 6);
@@ -325,7 +330,7 @@ void set_timecode(class DateTime& dt) {
   symbols[55] = (dt.year() % 4) == 0;
 }
 
-void print_timecode(void) {
+void print_timecode(uint8_t *symbols) {
   // Print out all the symbols to Serial.
   for (int i = 0; i < 60; ++i) {
     if (symbols[i] == ZERO)      Serial.print("0");
@@ -335,9 +340,204 @@ void print_timecode(void) {
     if ((i % 20) == 19) Serial.println();
   }
 }
+
+// =================================
+// WWVB PSK timecodesymbol sequence
+// =================================
+
+void write_binary(uint32_t value, uint8_t *dest, uint8_t nbits) {
+  // Write big-endian binary value into a uint8_t array bit by bit.
+  uint32_t bitmask = 1L << (nbits - 1);
+  while (nbits--) {
+    if (value & bitmask) {
+      *dest = 1;
+    } else {
+      *dest = 0;
+    }
+    ++dest;
+    bitmask >>= 1L;
+  }
+}
+
+uint32_t minute_of_century(const class DateTime& dt) {
+  uint16_t day_of_century = date2days(dt.year(), dt.month(), dt.day());
+  uint32_t minute_ = dt.minute() + 60L * (dt.hour() + 24L * day_of_century);
+  return minute_;
+}
+
+// See https://gist.github.com/qsxcv/b2f9976763d52bf1e7fc255f52f05f5b
+// https://graphics.stanford.edu/~seander/bithacks.html#ParityParallel
+static inline bool parity32(uint32_t v)
+{
+  v ^= v >> 16;
+  v ^= v >> 8;
+  v ^= v >> 4;
+  v &= 0xf;
+  return (0x6996 >> v) & 1;
+}
+
+// Bit masks derived from section 4.3 of
+// https://www.nist.gov/system/files/documents/2017/05/09/NIST-Enhanced-WWVB-Broadcast-Format-1_01-2013-11-06.pdf
+uint8_t time_parity(uint32_t time_val) {
+  return parity32(time_val & 0b00101100111110001101110101) |
+         (parity32(time_val & 0b01011001111100011011101010) << 1) |
+          (parity32(time_val & 0b10110011111000110111010100) << 2) |
+      (parity32(time_val & 0b01001011001111100011011101) << 3) |
+       (parity32(time_val & 0b10010110011111000110111010) << 4);
+}
+
+void test_hamming_checksum(class DateTime &dt) {
+  Serial.println("** test_hamming_checksum **");
+  uint32_t min_of_cent = minute_of_century(dt);
+  Serial.print("Min of cent=");
+  Serial.print(min_of_cent);
+  Serial.print(" = 0b");
+  Serial.println(min_of_cent, BIN);
+  Serial.print("Checksum=");
+  Serial.println(time_parity(min_of_cent), BIN);
+}
+
+// DST logic
+//#include <Timezone.h>       // https://github.com/JChristensen/Timezone
+//// US Eastern Time Zone (New York, Detroit)
+//TimeChangeRule myDST = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
+//TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
+//Timezone myTZ(myDST, mySTD);
+
+// Hard-coded US DST code from awesomeclock_1632_trinket
+int dst_cache_year = -1;
+int dst_start_day = 0;
+int dst_end_day = 0;
+
+uint8_t days_in_month(uint8_t month, bool leapyear) {
+  if (month == 2) return 28 + leapyear;
+  return 30 + ((month + (month > 7)) % 2);
+}
+
+int day_of_year(uint8_t year, uint8_t month, uint8_t day) {
+  // Jan 1st is 0
+  bool leapyear = (year % 4) == 0;
+  int day_of_year = 0;
+  for (int i = 1; i < month; ++i) day_of_year += days_in_month(i, leapyear);
+  return day_of_year + (day - 1);
+}
+
+void calc_timechange_days(int year) {
+  // Jan 1st 2000 was a Saturday.  So what day is March 1st this year? 0 = Sun.
+  year %= 100;
+  uint8_t march_first_dow = (6 + 365L * year + ((year + 4) / 4) + 31 + 28) % 7;
+  uint8_t second_sunday_date = 14 - ((march_first_dow - 1) % 7);
+  dst_start_day = 31 + 28 + ((year % 4) == 0) + second_sunday_date - 1;
+  // March and November are 245 days == 35.0 weeks apart, so 1st sunday in Nov is the same DOW
+  dst_end_day = dst_start_day + 245 - 7;  // 1st sunday, not 2nd.
+  dst_cache_year = year;
+}
+
+static inline bool is_dst_day(int year_day) {
+  return (year_day >= dst_start_day) && (year_day < dst_end_day);
+}
+
+// dst_ls code tables from NIST's Enhanced WWVB Broadcast Format PDF of November 6 2013
+// https://www.nist.gov/system/files/documents/2017/05/09/NIST-Enhanced-WWVB-Broadcast-Format-1_01-2013-11-06.pdf
+// Table 4 - no leap second (leap_sec[1:0] = 0 x).  Index is by dst_on[1] * 2 + dst_on[0]
+uint8_t dst_ls_table_no_ls[4] = {8, 21, 22, 3};
+// Negative leap second at end of month (leap_sec[1:0] = 1 0)
+uint8_t dst_ls_table_neg_ls[4] = {4, 14, 16, 13};
+// Positive leap second at end of month (leap_sec[1:0] = 1 1)
+uint8_t dst_ls_table_pos_ls[4] = {25, 28, 26, 31};
+
+uint8_t dst_ls_code(uint16_t year, uint8_t month, uint8_t day) {
+  calc_timechange_days(year);
+  int this_day_of_year = day_of_year(year % 100, month, day);
+  uint8_t dst_on;  // just the bottom 2 bits
+  dst_on = (is_dst_day(this_day_of_year) << 1) + is_dst_day(this_day_of_year - 1);  // lsb changes 24h after upper bit changes.
+  bool leap_second_at_end_of_month = false;
+  bool positive_leap_second = false;
+  uint8_t leap_sec = (leap_second_at_end_of_month << 1) + positive_leap_second;
+  uint8_t *dst_ls_table;
+  if (!leap_second_at_end_of_month) {
+    dst_ls_table = dst_ls_table_no_ls;
+  } else {
+    if (!positive_leap_second) {
+      dst_ls_table = dst_ls_table_neg_ls;
+    } else {
+      dst_ls_table = dst_ls_table_pos_ls;      
+    }
+  }  
+  return dst_ls_table[dst_on];
+}
+
+// "Reserved" PSK bits at :29 and :39.
+const int reserved_29 = 0;
+const int reserved_39 = 1;
+const int notice_49 = 1;  // Pretent there's something to report to resemble example.
+
+void setup_phasecode(void) {
+  // See https://en.wikipedia.org/wiki/WWVB#Phase_modulated_time_code
+  // One-time initialization of the fields that don't change.
+  // Format the data into the bits.
+  for (int8_t i = 0; i < 60; ++i) phase_bits[i] = 0;
+  // 14 sync bits starting from [59] are 0,0011101101000
+  // Assume phase_bits[59] is left at zero, write the next 13.
+  write_binary(0x0768, phase_bits + 0, 13);
+  // Table 8 lists a lot of possible codes, but we're assuming current US DST rules.
+  // So only two possibilities matter: next DST event is a spring forward, or a fall back.
+  // Current DST encoding.
+  uint8_t dst_next = 27;
+  write_binary(dst_next, phase_bits + 53, 6);
+  // The two reserved bits are 29 and 39.  The example shows 39 as 1.
+  //phase_bits[29] = reserved_29;
+  //phase_bits[39] = reserved_39;
+  //phase_bits[49] = notice_49;
+  // These are stomped on when setting the time bits, so get rewritten in set_phasecode.
+}
+
+void set_phasecode(const class DateTime& dt) {
+  // Set the parts of the phase_bits[] table that change.
+  // Binary minute of the century.
+  long int time_code = minute_of_century(dt);
+  int time_par = time_parity(time_code);
+  // Time parity.
+  write_binary(time_par, phase_bits + 13, 5);
+  // Actual time, initially in [19] to [44].  We'll have to fix up the end later.
+  write_binary(time_code, phase_bits + 19, 26);
+  // Fix up the beginning.
+  phase_bits[18] = phase_bits[19];  // top bit moved back one
+  // Copy last 7 bits forward two places.
+  for (int8_t i = 46; i >= 40; --i) {
+    phase_bits[i] = phase_bits[i - 2];
+  }
+  // Copy preceding 9 bits forward one place.
+  for (int8_t i = 38; i >= 30; --i) {
+    phase_bits[i] = phase_bits[i - 1];
+  }
+  // Restore the reserved-bit gaps.
+  phase_bits[29] = reserved_29;
+  phase_bits[39] = reserved_39;
+  // Set the copy of timecode bit 0.
+  phase_bits[19] = phase_bits[46];
+  // DST info
+  uint8_t dst_ls = dst_ls_code(dt.year(), dt.month(), dt.day());
+  write_binary(dst_ls, phase_bits + 48, 5);
+  phase_bits[47] = phase_bits[48];
+  phase_bits[48] = phase_bits[49];
+  // Rewrite notice bit.
+  phase_bits[49] = notice_49;
+}
+
 // ==================================
 // Handle 1PPS update
 // ==================================
+
+void update_codes(const class DateTime &dt) {
+  // Update symbols for the new minute.  This will update before the modulator reads them.
+  set_timecode(dt);
+  set_phasecode(dt);
+  Serial.println("AM:");
+  print_timecode(symbols);
+  Serial.println("PSK:");
+  print_timecode(phase_bits);
+}
 
 void update_rtc(void) {
   if (pending_rtc_interrupt) {
@@ -345,16 +545,14 @@ void update_rtc(void) {
     // Read back the time.
     DateTime dt = rtc.now();
     if (dt.second() == 0) {
-      // Update symbols for the new minute.  This will update before the modulator reads them.
-      set_timecode(dt);
-      print_timecode();
+      update_codes(dt);
       // Reset the 60 second cycle.
       symbol_index = 0;
       // Set the cycle-start semaphore (will be cleared after 0.1 sec)
-      PORTB |= (1 << PB4); 
+      PORTB |= (1 << PB4);
       // Report to terminal
       char time_str[20];
-      //Serial.println(sprint_datetime(time_str, dt));  
+      //Serial.println(sprint_datetime(time_str, dt));
     }
     // Update the duty cycle and start the next frame.
     // (This is kinda late if we do the Serial.print before it...)
@@ -373,7 +571,7 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
   pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);    
+  digitalWrite(LED_BUILTIN, LOW);
   Serial.println("** wwvb_simulator **");
   // Default OC1A,B are output low
   pinMode(9, OUTPUT);
@@ -383,12 +581,21 @@ void setup() {
   // Pin for frame start
   pinMode(frame_pin, OUTPUT);
   digitalWrite(frame_pin, LOW);
-
+  
   setup_rtc();
   setup_interrupts();
   setup_symbols();
   setup_timecode();
+  setup_phasecode();
   setup_60kHz();
+
+  // Example from Wikpedia WWVB page
+  DateTime dt(2012, 7, 4, 17, 30, 0);
+  update_codes(dt);
+  //test_hamming_checksum(dt);
+  // Example from NIST Enhanced WWVB pdf.
+  //DateTime dt2(2016, 7, 28, 21, 30, 0);
+  //test_hamming_checksum(dt2);
 }
 
 void loop() {
