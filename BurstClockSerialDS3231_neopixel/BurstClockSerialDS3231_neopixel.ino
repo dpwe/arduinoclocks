@@ -45,11 +45,17 @@
 //#define STEPS_PER_CYCLE 2048
 //#define MINUTES_PER_CYCLE 15
 // Copal 227
-//#define STEPS_PER_CYCLE 1280  // 2048 steps per rev BYJ48
-#define STEPS_PER_CYCLE 320  // 512 steps per rev BYJ48
-#define MINUTES_PER_CYCLE 9
+//#define STEPS_PER_CYCLE 1280  // 2048 steps per rev 28-BYJ48
+//#define STEPS_PER_CYCLE 320  // 512 steps per rev 28-BYJ48
+//#define MINUTES_PER_CYCLE 9
 // If it was a 513 steps per rev x 12 teeth per rev x 50 teeth per hour
-// that would be 6 mins per 285 steps
+// that would be 8 mins per 285 steps
+//#define STEPS_PER_CYCLE 285  // 513 steps per rev 28-BYJ48
+//#define MINUTES_PER_CYCLE 8
+// Adafruit actually claims it's 32*16.032 steps/rev = 32*2004/125
+// In which case.. 32.62667 steps/minute
+#define STEPS_PER_CYCLE 2672
+#define MINUTES_PER_CYCLE 75
 
 #include <Tone.h>  // https://github.com/bhagman/Tone
 Tone tone_out[2];  // Allocate two timers so we can *not* use tone_out[0],
@@ -157,8 +163,8 @@ volatile long steps_to_do_semaphore = 0;
 // Status that can be inspected by client.
 volatile bool stepper_active = 0;
 
-// When active, we advance the stepper every 3 ms.
-#define MS_BETWEEN_STEPS 3
+// When active, we advance the stepper every XX ms.  Too fast, and it drops steps.
+#define MS_BETWEEN_STEPS 10
 
 void next_step_callback(void)
 {
@@ -688,7 +694,11 @@ void setup() {
 
     // initialize serial communication at 9600 bits per second.
     Serial.begin(9600);
-    
+
+    Serial.print("BurstClock neopixel ");
+    Serial.print(__DATE__);
+    Serial.print(" ");
+    Serial.println(__TIME__);
     Serial.println("Post-reset settling...");
     delay(2000);
 
