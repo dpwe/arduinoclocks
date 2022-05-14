@@ -45,8 +45,11 @@
 //#define STEPS_PER_CYCLE 2048
 //#define MINUTES_PER_CYCLE 15
 // Copal 227
-#define STEPS_PER_CYCLE 1280
+//#define STEPS_PER_CYCLE 1280  // 2048 steps per rev BYJ48
+#define STEPS_PER_CYCLE 320  // 512 steps per rev BYJ48
 #define MINUTES_PER_CYCLE 9
+// If it was a 513 steps per rev x 12 teeth per rev x 50 teeth per hour
+// that would be 6 mins per 285 steps
 
 #include <Tone.h>  // https://github.com/bhagman/Tone
 Tone tone_out[2];  // Allocate two timers so we can *not* use tone_out[0],
@@ -628,7 +631,7 @@ void serial_print_tm(const tmElements_t &tm)
 #include <Adafruit_NeoPixel.h>
 Adafruit_NeoPixel pixel(1 /* NUMPIXELS */, NEOPIXEL_LED_PIN, NEO_RGB + NEO_KHZ800);
 
-uint32_t backlight_color = 0x200500;  // RGB
+uint32_t backlight_color = 0x060100;  // RGB
 
 void set_backlight_color(uint32_t val) {
   pixel.clear();
