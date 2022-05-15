@@ -45,17 +45,20 @@
 //#define STEPS_PER_CYCLE 2048
 //#define MINUTES_PER_CYCLE 15
 // Copal 227
-//#define STEPS_PER_CYCLE 1280  // 2048 steps per rev 28-BYJ48
+#define STEPS_PER_CYCLE 1280  // 2048 steps per rev 28-BYJ48
 //#define STEPS_PER_CYCLE 320  // 512 steps per rev 28-BYJ48
-//#define MINUTES_PER_CYCLE 9
+#define MINUTES_PER_CYCLE 9
 // If it was a 513 steps per rev x 12 teeth per rev x 50 teeth per hour
 // that would be 8 mins per 285 steps
 //#define STEPS_PER_CYCLE 285  // 513 steps per rev 28-BYJ48
 //#define MINUTES_PER_CYCLE 8
 // Adafruit actually claims it's 32*16.032 steps/rev = 32*2004/125
 // In which case.. 32.62667 steps/minute
-#define STEPS_PER_CYCLE 2672
-#define MINUTES_PER_CYCLE 75
+//#define STEPS_PER_CYCLE 2672
+//#define MINUTES_PER_CYCLE 75
+
+// Motor direction - default is anticlockwise
+#define CLOCKWISE 
 
 #include <Tone.h>  // https://github.com/bhagman/Tone
 Tone tone_out[2];  // Allocate two timers so we can *not* use tone_out[0],
@@ -140,13 +143,21 @@ void step_to_state(int state) {
   switch (state % 4) {
     // The "backwards" motion of the motor is encoded directly here.
     case 0:
+#ifdef CLOCKWISE
+      set_pins(1, 1, 0, 0);
+#else
       set_pins(0, 0, 1, 1);
+#endif /* ClOCKWISE */
       break;
     case 1:
       set_pins(0, 1, 1, 0);
       break;
     case 2:
+#ifdef CLOCKWISE
+      set_pins(0, 0, 1, 1);
+#else
       set_pins(1, 1, 0, 0);
+#endif /* ClOCKWISE */
       break;
     case 3:
       set_pins(1, 0, 0, 1);
@@ -164,7 +175,7 @@ volatile long steps_to_do_semaphore = 0;
 volatile bool stepper_active = 0;
 
 // When active, we advance the stepper every XX ms.  Too fast, and it drops steps.
-#define MS_BETWEEN_STEPS 10
+#define MS_BETWEEN_STEPS 3
 
 void next_step_callback(void)
 {
