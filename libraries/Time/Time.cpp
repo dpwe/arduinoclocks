@@ -271,6 +271,19 @@ time_t now() {
   return (time_t)sysTime;
 }
 
+// Return the same time as seconds(), but x 1000, with milliseconds added on.
+uint16_t seconds_millis() {
+  uint8_t now_secs = now() % 60;
+  // prevMillis is set by now() to be the millis from the preceding second.
+  uint16_t milliseconds_this_minute = (1000 * now_secs) + (millis() - prevMillis);
+  // millis() may have stepped over another second boundary since now() was called.
+  if (milliseconds_this_minute > 60000) {
+    milliseconds_this_minute -= 60000;
+  }
+  return milliseconds_this_minute;
+}
+
+
 void setTime(time_t t) { 
 #ifdef TIME_DRIFT_INFO
  if(sysUnsyncedTime == 0) 

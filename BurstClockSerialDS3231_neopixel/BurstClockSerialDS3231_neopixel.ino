@@ -646,22 +646,131 @@ void serial_print_tm(const tmElements_t &tm)
 #define NEOPIXEL_LED_PIN 5
 
 #include <Adafruit_NeoPixel.h>
-Adafruit_NeoPixel pixel(1 /* NUMPIXELS */, NEOPIXEL_LED_PIN, NEO_RGB + NEO_KHZ800);
+// 3 Neopixels in the chain.  Pixel[0] is the glow lamp,
+// pixels[1] and [2] are a pair either side of the whirlygig hole
+Adafruit_NeoPixel pixel(3 /* NUMPIXELS */, NEOPIXEL_LED_PIN, NEO_RGB + NEO_KHZ800);
 
 uint32_t backlight_color = 0x060100;  // RGB
 
 void set_backlight_color(uint32_t val) {
   pixel.clear();
   pixel.setPixelColor(0, val);
+  backlight_color = val;
   pixel.show();
+}
+
+void neo_setup(void) {
+    pixel.begin();
+    set_backlight_color(backlight_color);
+}
+
+const uint16_t hue_advance = 1024;
+uint16_t neo_hue_1 = 0;
+uint16_t neo_hue_2 = hue_advance;
+uint8_t neo_sat = 255;
+uint8_t neo_val = 0;
+bool neo1_increasing = true;
+bool last_neo1_increasing = false;
+
+const uint8_t val_advance = 1;
+const uint8_t val_max = 64;
+
+uint8_t neo_tick = 0;
+const uint8_t neo_tick_max = 1;
+
+// Return the same time as seconds(), but x 1000, with milliseconds added on.
+// Had to be put in TimeLib.cpp to access prevMillis.
+//uint16_t seconds_millis() {
+//  uint8_t now_secs = now() % 60;
+//  // prevMillis is set by now() to be the millis from the preceding second.
+//  uint16_t milliseconds_this_minute = (1000 * now_secs) + (millis() - prevMillis);
+//  // millis() may have stepped over another second boundary since now() was called.
+//  if (milliseconds_this_minute > 60000) {
+//    milliseconds_this_minute -= 60000;
+//  }
+//  return milliseconds_this_minute;
+//}
+
+// The whirlygig hole is indirectly illuminated by two neopixels, one on each side.
+// One fades up while the other fades down, approx once per second.
+// When either led goes through zero intensity, its hue advances by a fixed step, so the colors
+// cycle about once per minute.
+
+void neo_update(void) {
+  // just skip most of the time.
+  if (++neo_tick < neo_tick_max) return;
+  neo_tick = 0;
+  // Get the current time.
+  uint16_t time_secs_millis = seconds_millis();
+  uint8_t time_secs = time_secs_millis / 1000;
+  uint16_t time_millis = time_secs_millis % 1000;
+  neo_val = (time_millis * val_max) / 1000;
+  if (!(time_secs & 1)) {
+    // Even-numbered second, val increasing.
+    neo1_increasing = true;
+  } else {
+    // Odd-numbered second, val decreasing.
+    neo1_increasing = false;
+  }
+  if (neo1_increasing != last_neo1_increasing) {
+    // direction flip, change the hue of the dimmer light.
+    last_neo1_increasing = neo1_increasing;
+    uint16_t new_hue = time_secs * (16384 / 15);  // i.e. (65536 / 60) so full loop per min.
+    if (neo1_increasing) neo_hue_1 = new_hue;  // led1 just went through min.
+    else neo_hue_2 = new_hue;
+  }
+  
+  // Send the new colors.
+  pixel.clear();
+  pixel.setPixelColor(0, backlight_color);
+  uint8_t val1, val2;
+  if (neo1_increasing) {
+    val1 = neo_val;
+    val2 = val_max - neo_val;
+  } else {
+    val1 = val_max - neo_val;
+    val2 = neo_val;
+  }
+  pixel.setPixelColor(1, pixel.ColorHSV(neo_hue_1, neo_sat, val1));
+  pixel.setPixelColor(2, pixel.ColorHSV(neo_hue_2, neo_sat, val2));
+  pixel.show();
+  if (val_max - neo_val <= val_advance)  neo_val = val_max;
+  else neo_val += val_advance;
+}
+
+void neo_update_old(void) {
+  if (++neo_tick < neo_tick_max) return;
+  neo_tick = 0;
+  if (neo_val == val_max) {
+    neo_val = 0;
+    // time to flip colors
+    if (neo1_increasing) {
+      neo_hue_2 += 2 * hue_advance;
+    } else {
+      neo_hue_1 += 2 * hue_advance;
+    }
+    neo1_increasing = !neo1_increasing;
+  }
+  pixel.clear();
+  pixel.setPixelColor(0, backlight_color);
+  uint8_t val1, val2;
+  if (neo1_increasing) {
+    val1 = neo_val;
+    val2 = val_max - neo_val;
+  } else {
+    val1 = val_max - neo_val;
+    val2 = neo_val;
+  }
+  pixel.setPixelColor(1, pixel.ColorHSV(neo_hue_1, neo_sat, val1));
+  pixel.setPixelColor(2, pixel.ColorHSV(neo_hue_2, neo_sat, val2));
+  pixel.show();
+  if (val_max - neo_val <= val_advance)  neo_val = val_max;
+  else neo_val += val_advance;
 }
 
 void sys_setup(void) {
     tone_out[0].begin(2);  // This is a dummy, to stop Timer2 being used.
     tone_out[1].begin(BUZZER_PIN);  // This tone is assigned to Timer1, we'll use it.
-    
-    pixel.begin();
-    set_backlight_color(backlight_color);
 
     // Override tone_out[0] to use D2 as button input.
     pinMode(WIND_ON_BTN_PIN, INPUT_PULLUP);
@@ -719,6 +828,7 @@ void setup() {
     RTC_setup();
     cmd_setup();
     int_setup();
+    neo_setup();
     sys_setup();
 }
 
@@ -727,6 +837,7 @@ void loop() {
   flip_update();
   cmd_update();
   int_update();
+  neo_update();
   sys_update();
   delay(7); // ~100 Hz looping.
 }
