@@ -17,6 +17,8 @@ Following my recent obsession with [DS3231-based clocks](2022-03-20-synchronizer
 
 But then I had another idea: A crystal oscillator circuit is a pretty delicate feedback oscillator, which is why it's sensitive to capacitor loading.  Perhaps I could simply inject a higher-quality 32.768 kHz signal into the circuit and have the clock sync to that?  The DS3231SN modules I've been using can be tuned down to better than 1ppm accuracy, and I have several to hand.  Worth a try!
 
+*Note that this needs to be based on a [DS3231SN](https://www.mouser.com/datasheet/2/256/DS3231-1513891.pdf), the chip with a built-in crystal that compensates the 32 kHz output based on ambient temperature.  The lower-cost [DS3231M](https://www.mouser.com/datasheet/2/256/DS3231M-1878877.pdf) -- which is commonly substituted on the modules available on the web -- uses a very different mechanism - a fixed 32 kHz oscillator, then temperature compensation of the exact number of clock cycles per second.  The 32 kHz output itself is only spec'd as accurate to 2.5% (!), so would actually make the clock radio signficantly less accurate (about 5 min per day!).*
+
 Opening up the clock, I found lots of space and an easily-accessible circuit board:
 
 ![Inside the clock radio](images/icf-inside.png)
