@@ -29,7 +29,7 @@ Fortunately, I have a nice oscilloscope that allowed me to inspect the crystal o
 
 I played around with "nudging" the crystal oscillation by feeding the DS3231 32 kHz square wave into the crystal circuit via a large-ish resistor.  On one side of the crystal, adding any input stopped the oscillator altogether.  But on the other side, connecting the DS3231 output via a 100k resistor was enough to "lock" the crystal waveform to the frequency from the DS3231.  This gave me what I wanted - the clock's 32 kHz signal synced to the trimmed, temperature-compensated 32 kHz signal coming out of the DS3231 board.
 
-I powered the DS3231 board by wiring it to the 5V output on the regulator, wired up the resistor to connect to the crystal (the long yellow wire) and tucked it in to the side of the clock:
+I powered the DS3231 board by wiring it to the 5V output on the regulator, wired up the resistor to connect to the crystal (the long yellow wire) and tucked it in to the side of the clock (outlined in white):
 
 ![DS3231 board inside the clock radio](images/icf-with-ds3231.png)
 
