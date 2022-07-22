@@ -5,7 +5,7 @@
 
 In my quest for [synchronization sources](2022-03-20-synchronizer.md), I got interested in the "Atomic Time" broadcast by NIST from Ft Collins Colorado - [WWVB](https://en.wikipedia.org/wiki/WWVB) - that is the basis of consumer self-settig clocks including one I own from La Crosse.  They're temperamental in New York, because the reception from Colorado is weak; however, if I keep mine in a south-facing window, it manages to sync.
 
-![La Cross Atomic Clock](images/la-crosse-clock.jpg)
+![La Crosse Atomic Clock](images/la-crosse-clock.jpg)
 
 It turns out that in addition to the low-bitrate AM 60 kHz time signal used by the clocks, NIST added a more robust PSK encoding on top - encoding the data stream in phase shifts of the 60 kHz carrier.  However, there are not many receivers available.  The most promising one was a [development board](https://universal-solder.ca/product/canaduino-application-development-kit-with-everset-es100-mod-wwvb-bpsk-atomic-clock-receiver-module/) for the ES100 module, sold by Canaduino.  I bought one and built it.  Although it was fascinating in its way, even the PSK signal was hard to receive in New York, and very frustrating to experiment with since it took more that two minutes before it even told you that the signal was too weak and the antenna needed repositioning.  
 
