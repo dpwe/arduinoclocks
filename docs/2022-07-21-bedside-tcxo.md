@@ -36,3 +36,5 @@ I powered the DS3231 board by wiring it to the 5V output on the regulator, wired
 ![DS3231 board inside the clock radio](images/icf-with-ds3231.png)
 
 So far, the clock has been keeping good time, although it will take a few weeks before I can be sure it's no longer losing time.
+
+**Update 2022-08-25:** After a month, the bedside clock is ~4 sec slow, so something better than 2ppm.  However, I thought I had tuned the DS3231 to around 0.1 ppm.  It may be that it lost the trimming during installation (since the trimming relies on the battery backup to be preserved).  However, the core DS3231 driving is evidently working, since this clock would previously lose a large fraction of a minute per month.
