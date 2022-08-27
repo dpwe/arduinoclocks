@@ -42,12 +42,12 @@
 //   Brrggbb - Set backlight color to RGB value in hex.
 
 // GE 7-4305
-//#define STEPS_PER_CYCLE 2048
-//#define MINUTES_PER_CYCLE 15
+#define STEPS_PER_CYCLE 2048
+#define MINUTES_PER_CYCLE 12
 // Copal 227
-#define STEPS_PER_CYCLE 1280  // 2048 steps per rev 28-BYJ48
+//#define STEPS_PER_CYCLE 1280  // 2048 steps per rev 28-BYJ48
 //#define STEPS_PER_CYCLE 320  // 512 steps per rev 28-BYJ48
-#define MINUTES_PER_CYCLE 9
+//#define MINUTES_PER_CYCLE 9
 // If it was a 513 steps per rev x 12 teeth per rev x 50 teeth per hour
 // that would be 8 mins per 285 steps
 //#define STEPS_PER_CYCLE 285  // 513 steps per rev 28-BYJ48
@@ -57,8 +57,8 @@
 //#define STEPS_PER_CYCLE 2672
 //#define MINUTES_PER_CYCLE 75
 
-// Motor direction - default is anticlockwise
-#define CLOCKWISE 
+// Motor direction - default is anticlockwise (GE 7-4305).  Copal 227 is CLOCKWISE.
+//#define CLOCKWISE 
 
 #include <Tone.h>  // https://github.com/bhagman/Tone
 Tone tone_out[2];  // Allocate two timers so we can *not* use tone_out[0],
@@ -650,7 +650,7 @@ void serial_print_tm(const tmElements_t &tm)
 // pixels[1] and [2] are a pair either side of the whirlygig hole
 Adafruit_NeoPixel pixel(3 /* NUMPIXELS */, NEOPIXEL_LED_PIN, NEO_RGB + NEO_KHZ800);
 
-uint32_t backlight_color = 0x060100;  // RGB
+uint32_t backlight_color = 0x020203;  // blue-white // 0x060100;  // orange RGB
 
 void set_backlight_color(uint32_t val) {
   pixel.clear();
