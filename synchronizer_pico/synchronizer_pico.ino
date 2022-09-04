@@ -8,12 +8,16 @@
 // This version runs on the RPi Pico RP2040 chip.
 // with the Feather 128x64 OLED display and 3 input buttons connected ... somehow.
 
+#include <Wire.h>
+// Make efault I2C ("Wire") actually be Wire1 to match default on RP2040 Feather
+#define Wire Wire1
+
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
 
-// Pico pin setup.
-const int scl_pin = 17;
-const int sda_pin = 16;
-// Wiring of buttons from feather OLED
+// Pico pin setup, chosen to match pins used on RP2040 Feather (Wire1)
+const int sda_pin = 2;
+const int scl_pin = 3;
+// Three buttons to emulate those on Feather OLED 
 const int btn_a_pin = 18;
 const int btn_b_pin = 19;
 const int btn_c_pin = 20;
@@ -200,7 +204,6 @@ void ds3231_setAgingOffset(int offset) {
   Wire.write(offset);
   Wire.endTransmission();
 }
-
 
 bool pending_RTC_interrupt = false;
 
@@ -563,6 +566,15 @@ void cmd_update(void) {
   }
 }
 
+void adjust_rtc_trim(int val) {
+  // Adjust the DS3231 "aging register" trim by specified amount relative.
+  rtc_aging = ds3231_getAgingOffset();
+  rtc_aging += val;
+  ds3231_setAgingOffset(rtc_aging);
+  Serial.print("rtc_aging=");
+  Serial.println(rtc_aging);
+}
+
 // ======================================================
 // =========== Button management ==============
 // ======================================================
@@ -605,10 +617,14 @@ void buttons_update(void) {
         request_RTC_sync = true;
         break;
       case 1:
-        // Emit a sync command.
-        request_sync_output = true;
+        // Increase aging register
+        adjust_rtc_trim(1);
+        //// Emit a sync command.
+        //request_sync_output = true;
         break;
       case 2:
+        // Decrease aging register
+        adjust_rtc_trim(-1);
         break;
     }
   }
