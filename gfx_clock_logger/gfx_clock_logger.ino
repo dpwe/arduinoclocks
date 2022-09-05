@@ -11,6 +11,8 @@
 // Enable serial monitor?
 // When enabled, boot will hang if we *don't* have a computer attached (i.e., just USB power)
 //#define USE_SERIAL
+// Fake rapid cycling of time.
+//#define DEBUG
 
 // Which temperature sensor?
 //#define TEMP_SHT4x
@@ -299,7 +301,8 @@ void update_logger(int data_val, int data_time) {
     push_data(data_val, data_time);
   } else {
     // Update the most recent data so that logger shows current temp.
-    update_most_recent_data(data_val);
+    //update_most_recent_data(data_val);
+    // Skip this because plotting outside the current min/max range leaves permanent cruft on GFX display.
   }
 }
 
@@ -314,11 +317,11 @@ void setup_logger(void) {
 
 // Layout
 const uint16_t overall_top_y = 0;
-const uint16_t date_midline_y = overall_top_y - 0;
+const uint16_t date_midline_y = overall_top_y + 16;
 const uint16_t time_midline_y = overall_top_y + 52;
 const uint16_t seconds_midline_y = overall_top_y + 80;
 const uint16_t log_top_y = overall_top_y + 102;
-const uint16_t log_width = 128;
+const uint16_t log_width = 192;
 const uint16_t log_height = 32;
 const uint16_t display_mid_x = 120;
 const uint8_t secs_x_scale = 3;
@@ -351,10 +354,30 @@ enum text_alignment {
 };
 
 void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y_align = MIDDLE,
-                int16_t clear_width=0, int16_t clear_height=0) {
+                int16_t clear_width=0, int16_t clear_height=0, bool debug=false) {
   int16_t x1, y1;
   uint16_t w, h;
   tft.getTextBounds(s, x, y, &x1, &y1, &w, &h);
+#ifdef USE_SERIAL
+  if (debug) {
+      Serial.print("print_text: x=");
+      Serial.print(x);
+      Serial.print(" y=");
+      Serial.print(y);
+      Serial.print(" x1=");
+      Serial.print(x1);
+      Serial.print(" y1=");
+      Serial.print(y1);
+      Serial.print(" w=");
+      Serial.print(w);
+      Serial.print(" h=");
+      Serial.print(h);
+      Serial.print(" c_w=");
+      Serial.print(clear_width);
+      Serial.print(" c_h=");
+      Serial.println(clear_height);
+  }
+#endif 
   y1 = y;
   x1 = x;
   if (x_align == MIDDLE) {x1 -= w / 2;}
@@ -364,9 +387,10 @@ void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y
   if (clear_width) {
     if (x_align == RIGHT) {
       // If clear_width != w, make the right edges line up (not the left).
-      tft.fillRect(x1 + 1 + w - clear_width, y1 - h + 1, clear_width, clear_height, bgcolor);
+      // Need to stretch right edge to cover 11->12 transition.
+      tft.fillRect(x - clear_width, y1 - h + 1, clear_width + 4, clear_height, bgcolor);
     } else {
-      tft.fillRect(x1 + 1, y1 - h + 1, clear_width, clear_height, bgcolor);
+      tft.fillRect(x - 1, y1 - h + 1, clear_width + 2, clear_height, bgcolor);
     }
   }
   tft.setCursor(x1, y1);
@@ -467,7 +491,7 @@ void draw_time(int x, int y, int day_mins, bool show_minutes=true) {
 
 void draw_log_output(int x, int y, int w, int h) {
   // Clear canvas
-  tft.fillRect(x, y, w, h, bgcolor);
+  tft.fillRect(x, y - 1, w, h + 2, bgcolor);
   //tft.setTextSize(1);
   // Figure scaling
   tft.setFont(MICROFONT);
@@ -583,7 +607,11 @@ int update_display(time_t t) {
     sprint_date(dt, datestr);
     // Date.
     tft.setFont(SMALLFONT);
-    print_text(datestr, mid_x + 32, date_midline_y);
+    int16_t  x1, y1;
+    uint16_t w, h;
+    tft.getTextBounds(datestr, (int16_t)0, (int16_t)0, &x1, &y1, &w, &h);
+    //tft.drawRect(mid_x - w/2 - 8, date_midline_y - h/2 - 1, w + 16, h + 2, fgcolor);      
+    print_text(datestr, mid_x - w/2, date_midline_y - h/2, LEFT, TOP, w + 16, h, false);
   }
 
   colon_visible = !colon_visible;
@@ -797,7 +825,7 @@ void setup_backlight(void) {
 }
 
 int bright_tick = 0;
-const int ticks_per_step = 4096;
+const int ticks_per_step = 40; // 1ms delay on polling, was 4096;  
 
 static inline int8_t sgn(int val) {
   if (val < 0) return -1;
@@ -866,15 +894,25 @@ void setup()
 
 }
 
-time_t current_now = 0;
+//time_t current_now = 60 * (9 * 60 + 50);
+time_t current_now = 0; // 60 * (23 * 60 + 50);
 
 void loop()
 {
-  cmd_update();
+#ifdef DEBUG
+  // Quick cycling of time
+  if (current_now == 0) { current_now = now_local(); }
+  ++current_now;
+  int mins_within_day = update_display(current_now);
+  update_logger(read_temp_F(), mins_within_day);
+#else
   if (update_RTC()) {
     current_now = now_local();
     int mins_within_day = update_display(current_now);
     update_logger(read_temp_F(), mins_within_day);
   }
+#endif
+  cmd_update();
   update_backlight(hour(current_now));
+  delay(1);
 }
