@@ -17,7 +17,7 @@
 #define TEMP_DS3231
 
 // Do we use the backlight?
-//#define BACKLIGHT
+#define BACKLIGHT
 
 const int LOG_DATA_LEN = 120;     // One value per pixel, roughly.
 const int LOG_INTERVAL_MINS = 12;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
@@ -38,7 +38,7 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 // Pin 2 is I2C CLK on FEATHER_M4, so use 4 to catch the DS3231 interrupts. (NOTUSED)
 const int sqwPin = A1; // The number of the pin for monitor alarm status on DS3231
 
-const int backlightPin = 5;  // PWM output to drive dimmable backlight (NOTUSED)
+const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight (NOTUSED)
 
 volatile unsigned long rtc_micros = 0;
 volatile bool pending_RTC_interrupt = false;
@@ -69,25 +69,60 @@ TimeChangeRule myDST = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = 
 TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
 Timezone myTZ(myDST, mySTD);
 
-#include "RTClib.h"
-RTC_DS3231 rtc;
+//#include "RTClib.h"
+//RTC_DS3231 ds3231;
+#include <DS3231.h>
+#include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
+DS3231 ds3231;
+
+RTClib RTC;
 
 time_t last_time = 0;
 
+time_t RTC_utc_get(void) {
+  return RTC.now().unixtime();
+}
+
 time_t now_local(void) {
   // Like now(), but includes timezone modification.
-  return myTZ.toLocal(rtc.now().unixtime());
+  return myTZ.toLocal(now());
+}
+
+void RTC_set_time(const tmElements_t& tm) {
+  // Set the DS3231 time.
+  Serial.print("Set RTC: ");
+  serial_print_tm(tm);
+  ds3231.setYear(tmYearToY2k(tm.Year));
+  ds3231.setMonth(tm.Month);
+  ds3231.setDate(tm.Day);
+  ds3231.setHour(tm.Hour);
+  ds3231.setMinute(tm.Minute);
+  ds3231.setSecond(tm.Second);
+  // Resync TimeLib
+  //setTime(tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tm.Year);
+  setTime(RTC_utc_get());
 }
 
 void setup_RTC(void) {
-  if (! rtc.begin()) {
+  bool OscOn = true;
+  bool OnBattery = false;
+  byte frequency = 0;  // 0 == 1 Hz
+  ds3231.enableOscillator(OscOn, OnBattery, frequency);
+  bool h12 = false; // 24h mode
+  ds3231.setClockMode(h12);
+
+  setSyncProvider(RTC_utc_get);   // the function to get the time from the RTC
+  if(timeStatus()!= timeSet) {
 #ifdef USE_SERIAL
-    Serial.println("Couldn't find RTC");
+    Serial.println("Unable to sync with the RTC");
     Serial.flush();
 #endif
     abort();
+  } else {
+#ifdef USE_SERIAL
+     Serial.println("RTC has set the system time");
+#endif
   }
-  rtc.writeSqwPinMode(DS3231_SquareWave1Hz); // Place SQW pin into 1 Hz mode
 #ifdef USE_SERIAL
   Serial.println(now_local());
   Serial.println("RTC OK");
@@ -153,7 +188,7 @@ int read_temp_F(void) {
 
 #ifdef TEMP_DS3231
 int read_temp_F(void) {
-  return (int)round(rtc.getTemperature() * 1.8 + 32.0);
+  return (int)round(ds3231.getTemperature() * 1.8 + 32.0);
 }
 #endif
 
@@ -286,6 +321,8 @@ const uint16_t log_top_y = overall_top_y + 102;
 const uint16_t log_width = 128;
 const uint16_t log_height = 32;
 const uint16_t display_mid_x = 120;
+const uint8_t secs_x_scale = 3;
+const uint8_t secs_height = 8;
 
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
@@ -303,7 +340,7 @@ const char *datefmt = "DDD YYYY-MM-DD";
 
 // 565 RGB 16-bit colors
 int fgcolor = 0; // ST77XX_WHITE;
-int bgcolor = 0x07E6; // Bright blueish-green // ST77XX_BLACK;
+int bgcolor = 0x47E6; // Bright blueish-green // ST77XX_BLACK;
 
 enum text_alignment {
   TOP,
@@ -325,22 +362,24 @@ void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y
   if (y_align == MIDDLE) {y1 += h / 2;}
   else if (y_align == TOP) {y1 += h;}
   if (clear_width) {
-    tft.fillRect(x1 + 1, y1 - h + 1, clear_width, clear_height, bgcolor);
+    if (x_align == RIGHT) {
+      // If clear_width != w, make the right edges line up (not the left).
+      tft.fillRect(x1 + 1 + w - clear_width, y1 - h + 1, clear_width, clear_height, bgcolor);
+    } else {
+      tft.fillRect(x1 + 1, y1 - h + 1, clear_width, clear_height, bgcolor);
+    }
   }
   tft.setCursor(x1, y1);
   tft.print(s);
 }
 
+//int backlight_val = 32;
+
 void setup_display(void) {
 
   // turn on backlite
-  pinMode(TFT_BACKLITE, OUTPUT);
-  digitalWrite(TFT_BACKLITE, HIGH);
-
-  // turn on the TFT / I2C power supply
-  pinMode(TFT_I2C_POWER, OUTPUT);
-  digitalWrite(TFT_I2C_POWER, HIGH);
-  delay(10);
+  //pinMode(TFT_BACKLITE, OUTPUT);
+  //analogWrite(TFT_BACKLITE, backlight_val);
 
   // initialize TFT
   tft.init(135, 240); // Init ST7789 240x135
@@ -367,12 +406,10 @@ void setup_display(void) {
   
   // Seconds progress bar frame.
   // Seconds bar dimensions
-  const uint8_t x_scale = 2;
-  const uint8_t height = 4;
-  const uint8_t base_y = seconds_midline_y + height;
-  const uint8_t base_x = display_mid_x - x_scale * 30;
+  const uint8_t base_y = seconds_midline_y + secs_height / 2;
+  const uint8_t base_x = display_mid_x - secs_x_scale * 30;
   // Box around the second progress bar, 1 pixel separated.
-  tft.drawRect(base_x - 2, base_y - 2, 60 * x_scale + 4, 8, fgcolor);
+  tft.drawRect(base_x - 2, base_y - 2, 60 * secs_x_scale + 4, secs_height + 4, fgcolor);
 }
 
 char *sprint_int2(char *s, uint8_t n)
@@ -510,6 +547,24 @@ void draw_log_output(int x, int y, int w, int h) {
 int8_t last_day = 0, last_hour = -1, last_minute = -1;
 uint8_t colon_visible = true;
 
+char dow_names[] = "SunMonTueWedThuFriSat";
+
+void sprint_date(class DateTime& dt, char* datestr) {
+  // Fake dt.toString for our format.
+  int dow = dt.dayOfTheWeek();
+  char *s = datestr;
+  for (int i = 0; i < 3; ++i) {
+    *s++ = dow_names[3 * dow + i];
+  }
+  *s++ = ' ';
+  s = sprint_int(s, dt.year());
+  *s++ = '-';
+  s = sprint_int2(s, dt.month());
+  *s++ = '-';
+  s = sprint_int2(s, dt.day()); 
+  *s++ = '\0'; 
+}
+
 int update_display(time_t t) {
   // Returns minutes within day (0..1440).
   //u8g2.clearBuffer();   // for _F_ initializer only
@@ -525,7 +580,7 @@ int update_display(time_t t) {
     char datestr[16];
     strcpy(datestr, datefmt);
     DateTime dt(t);
-    dt.toString(datestr);
+    sprint_date(dt, datestr);
     // Date.
     tft.setFont(SMALLFONT);
     print_text(datestr, mid_x + 32, date_midline_y);
@@ -537,10 +592,8 @@ int update_display(time_t t) {
   const int time_y = time_midline_y;
 
   // Seconds bar dimensions
-  const uint8_t x_scale = 2;
-  const uint8_t height = 4;
-  const uint8_t base_y = seconds_midline_y + height;
-  const uint8_t base_x = mid_x - x_scale * 30;
+  const uint8_t base_y = seconds_midline_y + secs_height / 2;
+  const uint8_t base_x = mid_x - secs_x_scale * 30;
   // Bar width goes from 1 to 60 (instead of 0 to 59), so we have to work with one second ago.
   int prev_minute = tm.Minute;
   int prev_second = tm.Second - 1;
@@ -549,13 +602,13 @@ int update_display(time_t t) {
     prev_second += 60;
   }
   // Bar width goes from 1 to 60 (instead of 0 to 59)
-  uint8_t bar_width = x_scale * (1 + prev_second);
+  uint8_t bar_width = secs_x_scale * (1 + prev_second);
   if (prev_minute & 1) {
     // bar shrinking to right
-    tft.fillRect(base_x, base_y, bar_width, height, bgcolor);
+    tft.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
   } else {
     // bar growing from left
-    tft.fillRect(base_x, base_y, bar_width, height, fgcolor);
+    tft.fillRect(base_x, base_y, bar_width, secs_height, fgcolor);
   }
 
   // Logging plot setup
@@ -592,6 +645,137 @@ int update_display(time_t t) {
   return mins_within_day;
 }
 
+// -------------------------------------------------------------------
+// Input commands over serial line
+
+void cmd_setup(void) {
+  // Nothing to do?
+}
+
+byte atoi2(char *s) {
+  // Convert two ascii digits to a uint8.
+  return (s[1] - '0') + 10 * (s[0] - '0');
+}
+
+uint32_t htoi(char *s) {
+  // Convert hex string to long int.
+  uint32_t val = 0;
+  while(*s) {
+    uint8_t v = (*s) - '0';
+    if (v > 9) v -= 'A' - '0' + 10;
+    if (v > 15) v -= 'a' - 'A';
+    ++s;
+    val = (val << 4) + v;
+  }
+  return val;
+}
+
+int parse_string_to_mins(char *mins_string) {
+  // Convert a string like "2359" into minutes since midnight (1439 in this case)
+  if (strlen(mins_string) != 4) {
+    Serial.println("Error: cmd arg string is not 4 chrs.");
+    return -1;
+  }
+  int hours = atoi2(mins_string);
+  int minutes = atoi2(mins_string + 2);
+  return 60 * hours + minutes;
+}
+
+tmElements_t parse_time_string(char *time_string) {
+  // time_string must point to exactly 14 chars in format YYYYMMDDHHMMSS.
+  tmElements_t tm;
+  if (time_string[0] != '2' or time_string[1] != '0') {
+    Serial.println("Warn: Year does not start with 20...");
+  }
+  tm.Year = y2kYearToTm(atoi2(time_string + 2));
+  tm.Month = atoi2(time_string + 4);
+  tm.Day = atoi2(time_string + 6);
+  tm.Hour = atoi2(time_string + 8);
+  tm.Minute = atoi2(time_string + 10);
+  tm.Second = atoi2(time_string + 12);
+  return tm;
+}
+
+#define CMD_BUF_LEN 32
+char cmd_buffer[CMD_BUF_LEN];
+int cmd_len = 0;
+
+bool enable_rtc_updates = true;
+
+void cmd_update(void) {
+  int value;
+  if (Serial.available() > 0) {
+    // read the incoming byte:
+    char new_char = Serial.read();
+    if (new_char == '\n' || new_char == '\r') {
+      // handle command.
+      cmd_buffer[cmd_len] = '\0';
+      if (cmd_len > 0) {
+        byte cmd0 = cmd_buffer[0];
+        if (cmd0 >= 'a')  cmd0 -= ('a' - 'A');
+        switch (cmd0) {
+          case 'A':
+            // Set aging offset.
+            value = atoi(cmd_buffer + 1);
+            ds3231.setAgingOffset(value);
+            Serial.print("Aging offset=");
+            Serial.println((int8_t)ds3231.getAgingOffset());
+            break;
+          case 'Z':
+            // Set date/time: Z20211118094000 - 2021-11-18 09:40:00.
+            Serial.println("Z command");
+            if (strlen(cmd_buffer) < 15) {
+              Serial.println("Bad format - Zyyyymmddhhmmss");
+            } else {
+              RTC_set_time(parse_time_string(cmd_buffer + 1));
+              tmElements_t tm;
+              breakTime(now_local(), tm);
+              serial_print_tm(tm);
+            }
+            break;
+          case 'D':
+            // Specify display request: D2359
+            // Any invalid time string (eg. D-1) will stop the system trying to reach the time.
+            //move_to_time(parse_string_to_mins(cmd_buffer + 1));
+            break;
+          case 'W':
+            // Warp display state (to match actual display): W2359
+            //flip_set_state_mins(parse_string_to_mins(cmd_buffer + 1));
+            break;
+          case 'T':
+            // Enable (T1) / disable (T0) RTC time updates, or toggle: T
+            enable_rtc_updates = (cmd_len==1) ? !enable_rtc_updates : (cmd_buffer[1] == '1');
+            Serial.print("enable_rtc_updates: ");
+            Serial.println(enable_rtc_updates);
+            break;
+          case 'S':
+            // Execute some individual steps, bypassing the flip manager.
+            // Typically, one minute is 170 or 171 steps (142 for Copal227).
+            // We can use this to trim the stepper to be "mid cycle": 
+            //  - slowly wind on by ~10 steps until flap falls
+            //  - step on 85 (71) steps to be mid-cycle
+            //  - Warp display to current reading, you are now good.
+            //add_steps(atoi(cmd_buffer + 1));
+            break;
+          case 'B':
+            // Set backlight color to RRGGBB in hex.
+            uint32_t brightness = htoi(cmd_buffer + 1);
+            //set_backlight_color(brightness);
+            analogWrite(backlightPin, brightness);
+            Serial.print("new color=");
+            Serial.println(brightness);
+            break;
+        }
+      }
+      cmd_len = 0;
+    } else {
+      if (cmd_len < CMD_BUF_LEN) {
+        cmd_buffer[cmd_len++] = new_char;
+      }
+    }
+  }
+}
+
 // ---------------------------------
 // Backlight
 // ---------------------------------
@@ -602,15 +786,16 @@ const int light_high = 255;
 const int hour_up = 7;
 const int hour_down = 22;
 
+int brightness = 0;
+
 void setup_backlight(void) {
   // Backlight
 #ifdef BACKLIGHT
   pinMode(backlightPin, OUTPUT);  // sets the pin as output
-  analogWrite(backlightPin, light_low);
+  analogWrite(backlightPin, brightness);
 #endif
 }
 
-int brightness = 0;
 int bright_tick = 0;
 const int ticks_per_step = 4096;
 
@@ -650,21 +835,26 @@ void update_backlight(int hour) {
 
 void setup()
 {
-  //Wire.begin();
-  
 #ifdef USE_SERIAL
   Serial.begin(9600);
   // Wait for Serial port to open
   while (!Serial) {
     delay(10);
   }
-  delay(500);
+  //delay(500);
 
-  Serial.println(F("gfx_clock_logger "));
+  Serial.print(F("gfx_clock_logger "));
   Serial.print(__DATE__);
   Serial.print(" ");
   Serial.println(__TIME__);
 #endif
+
+  // turn on the TFT / I2C power supply
+  pinMode(TFT_I2C_POWER, OUTPUT);
+  digitalWrite(TFT_I2C_POWER, HIGH);
+  delay(10);
+
+  Wire.begin();
 
   setup_RTC();
   setup_interrupts();
@@ -672,12 +862,15 @@ void setup()
   setup_backlight();
   setup_temp_F();
   setup_logger();
+  cmd_setup();
+
 }
 
 time_t current_now = 0;
 
 void loop()
 {
+  cmd_update();
   if (update_RTC()) {
     current_now = now_local();
     int mins_within_day = update_display(current_now);
