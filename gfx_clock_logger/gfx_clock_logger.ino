@@ -10,7 +10,8 @@
 
 // Enable serial monitor?
 // When enabled, boot will hang if we *don't* have a computer attached (i.e., just USB power)
-//#define USE_SERIAL
+#define USE_SERIAL
+bool serial_available = false;
 // Fake rapid cycling of time.
 //#define DEBUG
 
@@ -92,7 +93,7 @@ time_t now_local(void) {
 
 void RTC_set_time(const tmElements_t& tm) {
   // Set the DS3231 time.
-  Serial.print("Set RTC: ");
+  if (serial_available) Serial.print("Set RTC: ");
   serial_print_tm(tm);
   ds3231.setYear(tmYearToY2k(tm.Year));
   ds3231.setMonth(tm.Month);
@@ -115,20 +116,17 @@ void setup_RTC(void) {
 
   setSyncProvider(RTC_utc_get);   // the function to get the time from the RTC
   if(timeStatus()!= timeSet) {
-#ifdef USE_SERIAL
-    Serial.println("Unable to sync with the RTC");
-    Serial.flush();
-#endif
+    if(serial_available) {
+      Serial.println("Unable to sync with the RTC");
+      Serial.flush();
+    }
     abort();
-  } else {
-#ifdef USE_SERIAL
-     Serial.println("RTC has set the system time");
-#endif
   }
-#ifdef USE_SERIAL
-  Serial.println(now_local());
-  Serial.println("RTC OK");
-#endif
+  if (serial_available) {
+    Serial.println("RTC has set the system time");
+    Serial.println(now_local());
+    Serial.println("RTC OK");
+  }
   last_time = now_local();
 }
 
@@ -163,16 +161,14 @@ Adafruit_SHT4x sht4 = Adafruit_SHT4x();
 void setup_temp_F(void) {
 #ifdef TEMP_SHT4x
   if (! sht4.begin()) {
-#ifdef USE_SERIAL
-    Serial.println("Couldn't find SHT4x");
-#endif
+  if (serial_available) Serial.println("Couldn't find SHT4x");
     while (1) delay(1);
   }
-#ifdef USE_SERIAL
-  Serial.println("Found SHT4x sensor");
-  Serial.print("Serial number 0x");
-  Serial.println(sht4.readSerial(), HEX);
-#endif // USE_SERIAL
+  if (serial_available) {
+    Serial.println("Found SHT4x sensor");
+    Serial.print("Serial number 0x");
+    Serial.println(sht4.readSerial(), HEX);
+  }
 #endif // TEMP_SHT4x
 }
 
@@ -180,10 +176,10 @@ void setup_temp_F(void) {
 int read_temp_F(void) {
   sensors_event_t humidity, temp;
   sht4.getEvent(&humidity, &temp);// populate temp and humidity objects with fresh data
-#ifdef USE_SERIAL
-  //Serial.print("Temperature: "); Serial.print(temp.temperature); Serial.println(" degrees C");
-  //Serial.print("Humidity: "); Serial.print(humidity.relative_humidity); Serial.println("% rH");
-#endif
+  if (serial_avaliable) {
+    //Serial.print("Temperature: "); Serial.print(temp.temperature); Serial.println(" degrees C");
+    //Serial.print("Humidity: "); Serial.print(humidity.relative_humidity); Serial.println("% rH");
+  }
   return (int)round(temp.temperature * 1.8 + 32.0);
 }
 #endif
@@ -209,20 +205,20 @@ void printDigits(int digits)
 
 void serial_print_tm(const tmElements_t &tm)
 {
-#ifdef USE_SERIAL
-  Serial.print(1970 + tm.Year);
-  Serial.print("-");
-  printDigits(tm.Month);
-  Serial.print("-");
-  printDigits(tm.Day);
-  Serial.print(" ");
-  printDigits(tm.Hour);
-  Serial.print(":");
-  printDigits(tm.Minute);
-  Serial.print(":");
-  printDigits(tm.Second);
-  Serial.println();
-#endif
+  if (serial_available) {
+    Serial.print(1970 + tm.Year);
+    Serial.print("-");
+    printDigits(tm.Month);
+    Serial.print("-");
+    printDigits(tm.Day);
+    Serial.print(" ");
+    printDigits(tm.Hour);
+    Serial.print(":");
+    printDigits(tm.Minute);
+    Serial.print(":");
+    printDigits(tm.Second);
+    Serial.println();
+  }
 }
 
 // -------------------
@@ -277,10 +273,10 @@ void update_most_recent_data(uint8_t new_data) {
 
 void push_data(uint8_t new_data, int new_time) {
   // Move forward data
-#ifdef USE_SERIAL
-  Serial.print("new_data: ");
-  Serial.println(new_data);
-#endif
+  if (serial_available) {
+     Serial.print("new_data: ");
+     Serial.println(new_data);
+  }
   for (int i = 0; i < LOG_DATA_LEN - 1; ++i) {
     log_data[i] = log_data[i + 1];
     log_times[i] = log_times[i + 1];
@@ -343,7 +339,7 @@ const char *datefmt = "DDD YYYY-MM-DD";
 
 // 565 RGB 16-bit colors
 int fgcolor = 0; // ST77XX_WHITE;
-int bgcolor = 0x47E6; // Bright blueish-green // ST77XX_BLACK;
+int bgcolor = 0x0847E6; // Bright blueish-green // ST77XX_BLACK;
 
 enum text_alignment {
   TOP,
@@ -358,8 +354,7 @@ void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y
   int16_t x1, y1;
   uint16_t w, h;
   tft.getTextBounds(s, x, y, &x1, &y1, &w, &h);
-#ifdef USE_SERIAL
-  if (debug) {
+  if (debug && serial_available) {
       Serial.print("print_text: x=");
       Serial.print(x);
       Serial.print(" y=");
@@ -377,7 +372,6 @@ void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y
       Serial.print(" c_h=");
       Serial.println(clear_height);
   }
-#endif 
   y1 = y;
   x1 = x;
   if (x_align == MIDDLE) {x1 -= w / 2;}
@@ -410,9 +404,6 @@ void setup_display(void) {
   tft.setRotation(3);
   tft.fillScreen(bgcolor);
 
-#ifdef USE_SERIAL
-  Serial.println(F("Initialized"));
-#endif
 
   tft.setFont(CalBlk36);
   //tft.setTextSize(2);
@@ -427,7 +418,17 @@ void setup_display(void) {
   digits_height += 1;
   
   tft.setTextColor(fgcolor);
-  
+
+  tft.setFont(MICROFONT);
+  tft.setCursor(234, 0);
+  tft.print("S");
+  if (serial_available) {
+    Serial.println(F("Initialized"));
+  } else {
+  tft.setCursor(234, 0);
+    tft.print("#");    
+  }
+
   // Seconds progress bar frame.
   // Seconds bar dimensions
   const uint8_t base_y = seconds_midline_y + secs_height / 2;
@@ -574,9 +575,10 @@ uint8_t colon_visible = true;
 char dow_names[] = "SunMonTueWedThuFriSat";
 
 void sprint_date(class DateTime& dt, char* datestr) {
-  // Fake dt.toString for our format.
+  // Fake dt.toString for our format.  Pad each end with spaces to get proper clearing of previous.
   int dow = dt.dayOfTheWeek();
   char *s = datestr;
+  *s++ = ' ';
   for (int i = 0; i < 3; ++i) {
     *s++ = dow_names[3 * dow + i];
   }
@@ -586,6 +588,7 @@ void sprint_date(class DateTime& dt, char* datestr) {
   s = sprint_int2(s, dt.month());
   *s++ = '-';
   s = sprint_int2(s, dt.day()); 
+  *s++ = ' ';
   *s++ = '\0'; 
 }
 
@@ -594,14 +597,14 @@ int update_display(time_t t) {
   //u8g2.clearBuffer();   // for _F_ initializer only
   //tft.fillScreen(bgcolor);
   int mid_x = display_mid_x;
-  
+
   tmElements_t tm;
   breakTime(t, tm);
   serial_print_tm(tm);
   int mins_within_day = 60 * tm.Hour + tm.Minute;
   if (tm.Day != last_day) {
     last_day = tm.Day;
-    char datestr[16];
+    char datestr[24];
     strcpy(datestr, datefmt);
     DateTime dt(t);
     sprint_date(dt, datestr);
@@ -701,7 +704,7 @@ uint32_t htoi(char *s) {
 int parse_string_to_mins(char *mins_string) {
   // Convert a string like "2359" into minutes since midnight (1439 in this case)
   if (strlen(mins_string) != 4) {
-    Serial.println("Error: cmd arg string is not 4 chrs.");
+    if (serial_available) Serial.println("Error: cmd arg string is not 4 chrs.");
     return -1;
   }
   int hours = atoi2(mins_string);
@@ -713,7 +716,7 @@ tmElements_t parse_time_string(char *time_string) {
   // time_string must point to exactly 14 chars in format YYYYMMDDHHMMSS.
   tmElements_t tm;
   if (time_string[0] != '2' or time_string[1] != '0') {
-    Serial.println("Warn: Year does not start with 20...");
+    if (serial_available) Serial.println("Warn: Year does not start with 20...");
   }
   tm.Year = y2kYearToTm(atoi2(time_string + 2));
   tm.Month = atoi2(time_string + 4);
@@ -732,7 +735,7 @@ bool enable_rtc_updates = true;
 
 void cmd_update(void) {
   int value;
-  if (Serial.available() > 0) {
+  if (serial_available && Serial.available() > 0) {
     // read the incoming byte:
     char new_char = Serial.read();
     if (new_char == '\n' || new_char == '\r') {
@@ -809,8 +812,8 @@ void cmd_update(void) {
 // ---------------------------------
 
 // Config for backlight day/night mode.
-const int light_low = 32;
-const int light_high = 255;
+const int light_low = 8;
+const int light_high = 64;
 const int hour_up = 7;
 const int hour_down = 22;
 
@@ -825,7 +828,7 @@ void setup_backlight(void) {
 }
 
 int bright_tick = 0;
-const int ticks_per_step = 40; // 1ms delay on polling, was 4096;  
+const int ticks_per_step = 1; // 1ms delay on polling, was 4096;  
 
 static inline int8_t sgn(int val) {
   if (val < 0) return -1;
@@ -846,10 +849,10 @@ void update_backlight(int hour) {
       brightness += (bright_delta >> 6) + sgn(bright_delta);
 #ifdef BACKLIGHT
       analogWrite(backlightPin, brightness);
-#ifdef USE_SERIAL
-      //Serial.print("brightness=");
-      //Serial.println(brightness);
-#endif // USE_SERIAL
+      if (serial_available) {
+        //Serial.print("brightness=");
+        //Serial.println(brightness);
+      }
 #endif // BACKLIGHT
     }
   }
@@ -866,16 +869,25 @@ void setup()
 #ifdef USE_SERIAL
   Serial.begin(9600);
   // Wait for Serial port to open
+  int i = 0;
+#define MAXWAIT 1000
   while (!Serial) {
     delay(10);
+    ++i;
+    if (i > MAXWAIT) break;
+  }
+  if (i <= MAXWAIT /* Serial */) {
+    serial_available = true;
   }
   //delay(500);
-
-  Serial.print(F("gfx_clock_logger "));
-  Serial.print(__DATE__);
-  Serial.print(" ");
-  Serial.println(__TIME__);
 #endif
+
+  if (serial_available) {
+    Serial.print(F("gfx_clock_logger "));
+    Serial.print(__DATE__);
+    Serial.print(" ");
+    Serial.println(__TIME__);
+  }
 
   // turn on the TFT / I2C power supply
   pinMode(TFT_I2C_POWER, OUTPUT);
@@ -914,5 +926,5 @@ void loop()
 #endif
   cmd_update();
   update_backlight(hour(current_now));
-  delay(1);
+  delay(50);
 }
