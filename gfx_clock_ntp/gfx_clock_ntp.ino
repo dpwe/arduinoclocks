@@ -199,6 +199,7 @@ const uint16_t date_midline_y = overall_top_y + 16;
 const uint16_t time_midline_y = overall_top_y + 46;
 const uint16_t seconds_midline_y = overall_top_y + 66;
 const uint16_t log_top_y = overall_top_y + 88;
+const uint16_t ntpstat_mid_y = 114;
 const uint16_t batstat_mid_y = 124;
 const uint16_t log_width = 192;
 const uint16_t log_height = 32;
@@ -353,7 +354,7 @@ void show_ntp_update(struct tm *timeinfo)
   *s++ = ' ';
   *s++ = '\0';
   tft.setFont(MICROFONT);
-  print_text(msg, display_mid_x, batstat_mid_y);
+  print_text(msg, display_mid_x, ntpstat_mid_y);
 }
 
 int8_t last_day = 0, last_hour = -1, last_minute = -1;
@@ -546,6 +547,57 @@ void cmd_update(void) {
 }
 
 // ---------------------------------
+// ---------- Battery monitor ----------
+// ---------------------------------
+#include "Adafruit_LC709203F.h"
+
+Adafruit_LC709203F lc;
+bool have_batmon = false;
+
+void init_batmon() {
+  if (!lc.begin()) {
+    if (serial_available)  Serial.println(F("Couldnt find Adafruit LC709203F?\nMake sure a battery is plugged in!"));
+  } else {
+    have_batmon = true;
+    if (serial_available) {
+      Serial.println(F("Found LC709203F"));
+      Serial.print("Version: 0x"); Serial.println(lc.getICversion(), HEX);
+    }
+    lc.setThermistorB(3950);
+    if (serial_available) {
+      Serial.print("Thermistor B = "); 
+      Serial.println(lc.getThermistorB());
+    }
+    lc.setPackSize(LC709203F_APA_500MAH);
+    lc.setAlarmVoltage(3.8);
+  }
+}
+
+void draw_batmon_stat() {
+  //if (serial_available) Serial.print("draw_batmon_stat");
+  if (have_batmon) {
+     char msg[32];
+     char *s = msg;
+     *s++ = ' ';
+     strcpy(s, "Batt: ");
+     s += strlen(s);
+     s = sprint_int(s, int(round(100.0*lc.cellVoltage())), 2);
+     *s++ = 'v';
+     *s++ = ' ';
+     s = sprint_int(s, int(round(lc.cellPercent())));
+     *s++ = '%';
+     *s++ = ' ';
+     s = sprint_int(s, int(round(10*lc.getCellTemperature())), 1);
+     *s++ = 'C';
+     *s++ = ' ';
+     *s++ = '\0';
+     tft.setFont(MICROFONT);
+     print_text(msg, display_mid_x, batstat_mid_y, MIDDLE, MIDDLE, 0, 0, false);
+     //if (serial_available) Serial.println(msg);
+  }
+}
+
+// ---------------------------------
 // Backlight
 // ---------------------------------
 
@@ -627,6 +679,7 @@ void setup()
 
   setup_RTC();
   setup_display();
+  init_batmon();
   setup_backlight();
   cmd_setup();
 }
@@ -639,6 +692,7 @@ void loop()
   if (update_RTC()) {
     current_now = now_local();
     mins_within_day = update_display(current_now);
+    draw_batmon_stat();
   }
   delay(50);
   cmd_update();
