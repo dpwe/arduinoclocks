@@ -133,6 +133,10 @@ void cmd_update(void) {
               Serial.println("Bad format - Zyyyymmddhhmmss");
             } else {
               Teensy3Clock.set(makeTime(parse_time_string(cmd_buffer + 1)));
+              Serial.print("Set time - ");
+              Serial.print(hour());
+              Serial.print(":");
+              Serial.println(minute());
             }
             break;
         }
