@@ -1,22 +1,13 @@
 /*
- * This example is pulled from the DS1307RTC library with slight
- * modifications to demonstrate how to use the alternate I2C pins
- * accessible on the SmartMatrix Shield.
- *
- * Original DS1307RTC Library:
- * https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
- *
- * Requires a DS1307, DS1337 or DS3231 RTC chip connected to
- * Teensy pins 19 (SCL) and 18 (SDA)
+ * MatrixClockDpwe
  * 
- * Use 3.3V power for RTC module and I2S Pullup Resistors as some Teensy modules aren't 5V tolerant
- *
- * If using an old (V1-V3) SmartMatrix Shield or bare Teensy 3 with address pins connected to your matrix
- * you'll need to connect Teensy pins 16 (SCL) and 17 (SDA), and uncomment the alternate pin code below
- *
- * Not tested, and most likely doesn't work on ESP32
+ * Clock displaying on 64x64 SmartMatrix 
+ * Driven by Teensy3.6 and SmartLEDShield http://docs.pixelmatix.com/SmartMatrix/shieldref.html
  * 
- * This SmartMatrix example uses just the indexed color layer
+ * Code based on MatrixClock example code at:
+ * https://github.com/pixelmatix/SmartMatrix/tree/master/examples/MatrixClock
+ * 
+ * Uses RTC built-in to Teensy 3.6, which has 32 kHz xtal and external 2032 battery.
  */
 
 #include <Wire.h>
@@ -30,6 +21,8 @@
 //#include <MatrixHardware_Teensy4_ShieldV4Adapter.h> // Teensy 4 Adapter attached to SmartLED Shield for Teensy 3 (V4)
 //#include <MatrixHardware_ESP32_V0.h>                // This file contains multiple ESP32 hardware configurations, edit the file to define GPIOPINOUT (or add #define GPIOPINOUT with a hardcoded number before this #include)
 //#include "MatrixHardware_Custom.h"                  // Copy an existing MatrixHardware file to your Sketch directory, rename, customize, and you can include it like this
+
+// from https://github.com/pixelmatix/SmartMatrix
 #include <SmartMatrix.h>
 #include <FastLED.h>
 
@@ -50,8 +43,10 @@ SMARTMATRIX_ALLOCATE_INDEXED_LAYER(indexedLayer, kMatrixWidth, kMatrixHeight, CO
 const int defaultBrightness = 64;
 //const int defaultBrightness = (2*255)/100;     // dim: 2% brightness
 
+//const SM_RGB clockColor = {0xc0, 0xc0, 0xc0};
+// note: clockColor is now set in set_brightness.
+const uint8_t clockIntensity = 0xc0;
 //const SM_RGB clockColor = {0x10, 0x40, 0xc0};
-const SM_RGB clockColor = {0xc0, 0xc0, 0xc0};
 //const SM_RGB clockColor2 = {0x50, 0x60, 0x80};
 
 const SM_RGB bgColor = {0x0, 0x0, 0x0};
@@ -133,12 +128,18 @@ void cmd_update(void) {
               Serial.println("Bad format - Zyyyymmddhhmmss");
             } else {
               Teensy3Clock.set(makeTime(parse_time_string(cmd_buffer + 1)));
+              resync_time();
               Serial.print("Set time - ");
               Serial.print(hour());
               Serial.print(":");
               Serial.println(minute());
             }
             break;
+          case 'B':
+            int brightness = atoi(cmd_buffer + 1);
+            set_brightness(brightness);
+            Serial.print("Brightness: ");
+            Serial.println(brightness);
         }
       }
       cmd_len = 0;
@@ -150,6 +151,63 @@ void cmd_update(void) {
   }
 }
 
+// ---------------------------------
+// Backlight
+// ---------------------------------
+
+// Config for backlight day/night mode.
+const int light_low = 1;  // Brightness 1 leaves only time/date, suppresses seconds/colors.  They kick in around 4.
+const int light_high = 255;
+const int hour_up = 7;
+const int hour_down = 22;
+
+void set_brightness(uint8_t brightness) {
+  backgroundLayer.setBrightness(brightness);
+  uint8_t min_intensity = 28;
+  uint8_t intensity = (uint8_t)(min_intensity + (((clockIntensity - min_intensity) * brightness) >> 8));
+  indexedLayer.setIndexedColor(1, {intensity, intensity, intensity});  
+}
+
+void setup_backlight(void) {
+  // Setup background.
+  set_brightness(light_high);
+  backgroundLayer.enableColorCorrection(true);
+}
+
+int brightness = 0;
+int bright_tick = 0;
+const int ticks_per_step = 4;
+
+static inline int8_t sgn(int val) {
+  if (val < 0) return -1;
+  if (val==0) return 0;
+  return 1;
+}
+
+void update_backlight(int hour) {
+  int target_brightness = light_low;
+  if (hour >= hour_up && hour < hour_down) {
+    target_brightness = light_high;
+  }
+  if (++bright_tick >= ticks_per_step) {
+    // Slow down the brightness change steps.
+    bright_tick = 0;
+    int bright_delta = target_brightness - brightness;
+    if (bright_delta) {
+      brightness += (bright_delta >> 6) + sgn(bright_delta);
+      set_brightness(brightness);
+      Serial.print("brightness=");
+      Serial.println(brightness);
+    }
+  }
+}
+
+
+void resync_time() {
+  // Force synchronization between system time and RTC.
+  // This is a side-effect of setSyncProvider in TimeLib.cc
+  setSyncProvider(getTeensy3Time);
+}
 
 void setup() {
 
@@ -168,18 +226,17 @@ void setup() {
   matrix.addLayer(&indexedLayer); 
   matrix.begin();
 
-  // Setup background.
-  backgroundLayer.setBrightness(255);
-  backgroundLayer.enableColorCorrection(true);
+  // Setup brightness etc.
+  setup_backlight();
 
   //indexedLayer.setIndexedColor(1, bgColor);
   backgroundLayer.fillScreen(bgColor);
 
   for (int i = 0; i < 8; ++i) {
-    backgroundLayer.fillRectangle(8 * i, 0, 8 * (i + 1) - 1, 10, {160 * (i & 1), 88 * (i & 2), 63 * (i & 4)});
+    backgroundLayer.fillRectangle(8 * i, 0, 8 * (i + 1) - 1, 10, {(uint8_t)(160 * (i & 1)), (uint8_t)(88 * (i & 2)), (uint8_t)(63 * (i & 4))});
   }
   for (int i = 0; i < 64; ++i) {
-    backgroundLayer.fillRectangle(i, 10, i + 1, 20, {(160 * i) / 64, (176 * i) / 64, (255 * i) / 64});
+    backgroundLayer.fillRectangle(i, 10, i + 1, 20, {(uint8_t)((160 * i) / 64), (uint8_t)((176 * i) / 64), (uint8_t)((255 * i) / 64)});
   }
 
   backgroundLayer.swapBuffers();
@@ -187,7 +244,7 @@ void setup() {
   // display a simple message - will stay on the screen if calls to the RTC library fail later
   indexedLayer.fillScreen(0);
   indexedLayer.setFont(gohufont11b);
-  indexedLayer.setIndexedColor(1, clockColor);
+  //indexedLayer.setIndexedColor(1, clockColor);
   indexedLayer.drawString(0, kMatrixHeight / 2 - 6, 1, "CLOCK");
   
   indexedLayer.swapBuffers(false);
@@ -228,6 +285,8 @@ void loop() {
   // Time including DST.
   tmElements_t tm;
   breakTime(now_local(), tm);
+  
+  update_backlight(tm.Hour);
 
   second_ = tm.Second;
   if (second_ != last_second) {
@@ -268,7 +327,6 @@ void loop() {
     //draw_fat_string(x, y, timeBuffer);
     indexedLayer.drawString(x, y, 1, timeBuffer);
 
-    
     // Track # millis between each tick.
     //sprintf(timeBuffer, "%4d", cached_millisSinceTick);
     //indexedLayer.setFont(font5x7);
