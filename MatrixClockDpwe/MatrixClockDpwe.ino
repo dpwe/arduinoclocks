@@ -54,7 +54,8 @@ const SM_RGB bgColor = {0x0, 0x0, 0x0};
 const SM_RGB dotColor = {0xff, 0x0, 0x0};
 
 
-short int rtc_tick = 0;
+volatile uint8_t rtc_tick = 0;
+volatile int32_t rtc_millis = 0;
 
 // from https://forum.pjrc.com/threads/32254-Teensy-3-x-RTC-Seconds-Interrupt
 void rtc_seconds_isr(void)
@@ -66,10 +67,24 @@ void rtc_seconds_isr(void)
     digitalWrite(13, state);
 
     rtc_tick = 1;
+    rtc_millis = millis();
+}
+
+void rtc_wait_for_tick() {
+  // Block until an RTC interrupt is observed.
+  uint32_t start_millis = millis();
+  rtc_tick = 0;
+  while (rtc_tick == 0) {
+  }
+  Serial.print("wait millis=");
+  Serial.println(millis() - start_millis);
 }
 
 time_t getTeensy3Time()
 {
+  // Wait for the tick, so that the returned time is super-fresh.
+  // Warning: This may block for up to a second.
+  rtc_wait_for_tick();
   return Teensy3Clock.get();
 }
 
@@ -196,8 +211,8 @@ void update_backlight(int hour) {
     if (bright_delta) {
       brightness += (bright_delta >> 6) + sgn(bright_delta);
       set_brightness(brightness);
-      Serial.print("brightness=");
-      Serial.println(brightness);
+      //Serial.print("brightness=");
+      //Serial.println(brightness);
     }
   }
 }
@@ -205,7 +220,7 @@ void update_backlight(int hour) {
 
 void resync_time() {
   // Force synchronization between system time and RTC.
-  // This is a side-effect of setSyncProvider in TimeLib.cc
+  // juuuThis is a side-effect of setSyncProvider in TimeLib.cc
   setSyncProvider(getTeensy3Time);
 }
 
@@ -215,9 +230,27 @@ void setup() {
   Serial.begin(9600);
   Serial.println("MatrixClock starting.");
 
+  // Measured Teensy 3.6 RTC performance over December 2022 was that the clock became 30 s slow over ~30 days.
+  // That's about 12 ppm slow.
+  // rtc_compensate(x) makes clock run x*0.1192 ppm fast.  So we need ~rtc_compensate(100).
+  //rtc_compensate(100);
+  Teensy3Clock.compensate(100);
+
+  Serial.print("RTC_SR=");
+  Serial.println(RTC_SR,HEX);
+  Serial.print("RTC_CR=");
+  Serial.println(RTC_CR,HEX);
+  Serial.print("RTC_IER=");
+  Serial.println(RTC_IER,HEX);
+  Serial.print("RTC_TCR=");
+  Serial.println(RTC_TCR,HEX);
+
+  delay(1000);
+
+
   RTC_IER |= 0x10;  // set the TSIE bit (Time Seconds Interrupt Enable)
   NVIC_ENABLE_IRQ(IRQ_RTC_SECOND);
-  
+
   // set the Time library to use Teensy 3.0's RTC to keep time
   setSyncProvider(getTeensy3Time);
 
@@ -327,10 +360,14 @@ void loop() {
     //draw_fat_string(x, y, timeBuffer);
     indexedLayer.drawString(x, y, 1, timeBuffer);
 
-    // Track # millis between each tick.
-    //sprintf(timeBuffer, "%4d", cached_millisSinceTick);
-    //indexedLayer.setFont(font5x7);
-    //indexedLayer.drawString(44, 55, 1, timeBuffer);
+#ifdef SHOW_TICK_SKEW
+    // Track millis skew between RTC interrupt and second change.
+    int delta_millis = millis() - rtc_millis;
+    if (delta_millis > 500)  delta_millis -= 1000;
+    sprintf(timeBuffer, "%4d", delta_millis);
+    indexedLayer.setFont(font5x7);
+    indexedLayer.drawString(44, 58, 1, timeBuffer);
+#endif // SHOW_TICK_SKEW
   
     indexedLayer.swapBuffers();
   }
@@ -397,6 +434,6 @@ void loop() {
 
   // Start next loop at what we expect to be 10ms after the next tick.
   //delay(1010 - millisSinceTick);
-  delay(10);
+  delay(2);
   
 }
