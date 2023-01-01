@@ -1,9 +1,8 @@
 // DS3231_explorer
 //
 // Allows reading and writing all the bits of a DS3231 RTC.
-// Also continually polls the clock and displays current time on attached SSD1351 display.
-//
-// Does not monitor SQWV output (e.g. fed to D2 for interrupts) at present.
+// Also continually polls the clock (for P1) and displays current time on attached SSD1351 display.
+// Also listens for SQWV on D3 input and reads time on falling edges (for S1).
 //
 // dpwe@google.com 2022-12-31
 
@@ -28,9 +27,11 @@
 // Mhhmm - Set Alarm 2 for every day at time hh:mm
 // MWhhmm - Set Alarm 2 for every week on dow W (Sunday = 1) at hh:mm
 // MDDhhmm - Set Alarm 2 for every month on date DD at hh:mm
+// Px - Enable (x=1) / Disable (x=0) continuous polling of current time.
 // Q - Read the sqwv frequency
 // Qx - Set sqwv frequency : x=0 -> 1 Hz / x=1 -> 1024 Hz / x=2 -> 4096 Hz / x=3 -> 8192 Hz
 // R - Reset the Oscillator Stop Flag
+// Sx - Enable (x=1) / Disable (x=0) clock read on SQWV interrupt (on D3).
 // T - Report most recent temp measurement
 // T1 - Initiate a new temperature conversion
 // Z - Read date/time
@@ -100,6 +101,23 @@ void update_display(DateTime &dt) {
   //tft.fillRect(0, 0, 128, 16, BLACK);
   tft.print(timestr);
 }
+
+// -------------- Interrupt ---------------
+// Expect SQWV input on D3
+const uint8_t sqwvPin = 3;
+
+volatile unsigned long rtc_micros = 0;
+
+void rtc_mark_isr(void)
+{
+  rtc_micros = micros();
+}
+
+void setup_interrupts() {
+  // DS3231 is on falling edge.
+  attachInterrupt(digitalPinToInterrupt(sqwvPin), rtc_mark_isr, FALLING);
+} 
+
 
 // -------------- Time --------------------
 
@@ -412,6 +430,12 @@ void sprint_alarm(uint8_t *regs, char *s) {
 // -------------------------------------------------------------------
 // Input commands over serial line
 
+// Flag as to whether to repeatedly read time.
+bool enable_polling = true;
+
+// Flag as to whether to respond to a falling edge on sqwvPin by reading time.
+bool enable_sqwv_int = true;
+
 void cmd_setup(void) {
   // Nothing to do?
   cmd_prompt();
@@ -468,11 +492,6 @@ DateTime parse_time_string(char *time_string) {
                   atoi2(time_string + 8), atoi2(time_string + 10), atoi2(time_string + 12));
 }
 
-void cmd_prompt() {
-  Serial.println("***Cmd: Ann/Bx/Cx/D/Ex/Ix/Lxxx/Mxxx/Qx/R/T1/Zxxx");
-  Serial.flush();
-}
-
 void print_enabled_disabled(char *s, int v) {
   Serial.print(s);
   Serial.print(" ");
@@ -525,8 +544,14 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm=1) {
   return DateTime(2000, 1, day, hr, min, sec);
 }
 
-const int16_t ds3231_freqs[4] = {1, 1024, 4096, 8192};
+void cmd_prompt() {
+  Serial.print("rtc_micros=");
+  Serial.println(rtc_micros);
+  Serial.println("***Cmd: Ann/Bx/Cx/D/Ex/Ix/Lxxx/Mxxx/Px/Qx/R/Sx/T1/Zxxx");
+  Serial.flush();
+}
 
+const int16_t ds3231_freqs[4] = {1, 1024, 4096, 8192};
 
 void handle_cmd(char cmd, char * arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
@@ -661,6 +686,14 @@ void handle_cmd(char cmd, char * arg) {
     Serial.println(s);
     break;
 
+   case 'P':
+    // Enable/disable continuous polling of time across I2C.
+    if (alen) {
+      enable_polling = atob(arg);
+    }
+    print_enabled_disabled("Polling", enable_polling);
+    break;
+    
    case 'Q':
     // SQWV frequency. RS2:RS1 are CONTROL bits 4 and 3
     ctrl = read_register(DS3231_CONTROL);
@@ -681,6 +714,14 @@ void handle_cmd(char cmd, char * arg) {
     status &= (0xFF - 0x83);
     write_register(DS3231_STATUS, status);
     Serial.println("OSF, A1F, A2F cleared.");
+    break;
+    
+   case 'S':
+    // Enable/disable read of time in response to falling edge on SQWV.
+    if (alen) {
+      enable_sqwv_int = atob(arg);
+    }
+    print_enabled_disabled("SQWV interrupt", enable_sqwv_int);
     break;
     
    case 'T':
@@ -780,18 +821,26 @@ void setup()
   Serial.println();
 
   cmd_setup();
+  setup_interrupts();
 }
+
+unsigned long last_rtc_micros = 0;
 
 int last_sec = 0;
 void loop()
 {
-  DateTime dt = DateTime(myTZ.toLocal(ds3231.now().unixtime()));
 
   cmd_update();
 
-  int now_sec = dt.second();
-  if (now_sec != last_sec) {
-    last_sec = now_sec;
-    update_display(dt);
+  if (enable_polling || (enable_sqwv_int && (last_rtc_micros != rtc_micros))) {
+    last_rtc_micros = rtc_micros;
+    DateTime dt = DateTime(myTZ.toLocal(ds3231.now().unixtime()));
+    int now_sec = dt.second();
+    if (now_sec != last_sec) {
+      last_sec = now_sec;
+      update_display(dt);
+    }
   }
+  
+  delay(20);
 }
