@@ -431,7 +431,7 @@ void sprint_alarm(uint8_t *regs, char *s) {
 // Input commands over serial line
 
 // Flag as to whether to repeatedly read time.
-bool enable_polling = true;
+bool enable_polling = false;
 
 // Flag as to whether to respond to a falling edge on sqwvPin by reading time.
 bool enable_sqwv_int = true;
@@ -545,8 +545,6 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm=1) {
 }
 
 void cmd_prompt() {
-  Serial.print("rtc_micros=");
-  Serial.println(rtc_micros);
   Serial.println("***Cmd: Ann/Bx/Cx/D/Ex/Ix/Lxxx/Mxxx/Px/Qx/R/Sx/T1/Zxxx");
   Serial.flush();
 }
@@ -635,6 +633,7 @@ void handle_cmd(char cmd, char * arg) {
     // Alarm 1
     if (alen == 1) {
       // Alarm1 enable/disable (bit 0 of CONTROL).
+      ctrl = read_register(DS3231_CONTROL);
       b = atob(arg);
       if (b) ctrl |= 0x01;
       else   ctrl &= (0xFF - 0x01);
@@ -662,6 +661,7 @@ void handle_cmd(char cmd, char * arg) {
     // Alarm 2
     if (alen == 1) {
       // Alarm2 enable/disable (bit 1 of CONTROL).
+      ctrl = read_register(DS3231_CONTROL);
       b = atob(arg);
       if (b) ctrl |= 0x02;
       else   ctrl &= (0xFF - 0x02);
