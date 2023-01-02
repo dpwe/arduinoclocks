@@ -44,11 +44,19 @@
 #include <Timezone.h>       // https://github.com/JChristensen/Timezone
 #include <RTClib.h>         // Adafruit; defines RTC_DS3231
 
-// ------------- SSD1351 RGB TFT Display ---------------
+// ------------- Display ---------------
 
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1351.h>
 
+// #define DISPLAY_SSD1351
+#define DISPLAY_ST7789
+
+#ifdef DISPLAY_SSD1351
+
+// Arduino - Expect SQWV input on D3
+const uint8_t sqwvPin = 3;
+
+#include <Adafruit_SSD1351.h>
 // Screen dimensions
 #define SCREEN_WIDTH  128
 #define SCREEN_HEIGHT 128 // Change this to 96 for 1.27" OLED.
@@ -70,9 +78,41 @@ Adafruit_SSD1351 tft = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PI
 #define MAGENTA         0xF81F
 #define YELLOW          0xFFE0  
 #define WHITE           0xFFFF
+#endif
+
+#ifdef DISPLAY_ST7789
+
+// ESP32-S3 TFT - Expect SQWV input on A0
+const uint8_t sqwvPin = A0;
+
+#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+
+#define SCREEN_WIDTH  240
+#define SCREEN_HEIGHT 135 // Change this to 96 for 1.27" OLED.
+
+// Use dedicated hardware SPI pins
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+
+const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
+
+#define WHITE ST77XX_WHITE
+#define BLACK ST77XX_BLACK
+
+#endif
+
 
 void setup_display(void) {
+#ifdef DISPLAY_SSD1351
   tft.begin();
+#endif
+#ifdef DISPLAY_ST7789
+  // turn on backlite
+  pinMode(TFT_BACKLITE, OUTPUT);
+  analogWrite(TFT_BACKLITE, 128);
+
+  tft.init(135, 240); // Init ST7789 240x135
+  tft.setRotation(3);
+#endif
 
   tft.fillScreen(BLACK);
 
@@ -103,8 +143,6 @@ void update_display(DateTime &dt) {
 }
 
 // -------------- Interrupt ---------------
-// Expect SQWV input on D3
-const uint8_t sqwvPin = 3;
 
 volatile unsigned long rtc_micros = 0;
 
@@ -174,7 +212,9 @@ time_t now_local(void) {
   return myTZ.toLocal(now());
 }
 
-time_t RTC_utc_get(void) {
+// getExternalTime is declared to expect a function returning a (signed) long int.
+//time_t 
+long int RTC_utc_get(void) {
   return ds3231.now().unixtime();
 }
 
@@ -240,10 +280,15 @@ uint8_t read_register(uint8_t reg) {
   return val;
 }
 
-void print_registers(void) {
+void get_registers(uint8_t *registers) {
   // Read all 19 hex registers and print out.
+  // registers must point to 19 free bytes.
+  wire_rx(CLOCK_ADDRESS, 0, 19, registers);
+}
+
+void print_registers(uint8_t *registers) {
+  // Display all 19 hex registers.
   Serial.print("Regs: ");
-  byte registers[19];
   wire_rx(CLOCK_ADDRESS, 0, 19, registers);
   for (int i = 0; i < 19; ++i) {
     if (registers[i] < 16)  Serial.print("0");
@@ -253,11 +298,7 @@ void print_registers(void) {
   Serial.println("");
 }
 
-void get_registers(uint8_t *registers) {
-  // Read all 19 hex registers and print out.
-  // registers must point to 19 free bytes.
-  wire_rx(CLOCK_ADDRESS, 0, 19, registers);
-}
+// ----- Encode/decode DS3231 registers ---------
 
 #define BCDTODEC(x) ((x) - 6 * ((x) >> 4))
 
@@ -288,79 +329,22 @@ void sprint_bits(uint8_t val, char* names[8], char *s) {
   }
 }
 
-char *CONTROL_NAMES[8] = {"/EOSC", "BBSQW", "CONV", "RS2", "RS1", "INTCN", "A2IE", "A1IE"};
-char *STATUS_NAMES[8] = {"OSF", "x", "x", "x", "EN32", "BSY", "A2F", "A1F"};
-
-void print_registers_fancy(uint8_t *registers) {
-  // registers is return from get_registers.
-  // Print date/time.
-  char s[64];
-  Serial.print("Time:");
-  for (int i=0; i < 7; ++i) {
-    Serial.print(" ");
-    print2Digits(registers[i], 16);
-  }
-  // Format the date/time
-  DateTime dt;
-  dt = ds3231_regs_to_datetime(registers);
-  sprint_datetime(dt, s);  
-  Serial.print(":   ");
-  Serial.println(s);
-  
-  Serial.print("Alarm1:       ");
-  for (int i = 7; i < 11; ++i) {
-    Serial.print(" ");
-    print2Digits(registers[i], 16);
-  }
-  // Format the alarm.
-  sprint_alarm(registers + 7, s);
-  Serial.print(":   ");
-  Serial.println(s);
- 
-  Serial.print("Alarm2:          ");
-  for (int i = 11; i < 14; ++i) {
-    Serial.print(" ");
-    print2Digits(registers[i], 16);
-  }
-  // Format the alarm.  Alarm2 has an implict zero for seconds.
-  registers[10] = 0;
-  sprint_alarm(registers + 10, s);
-  Serial.print(":   ");
-  Serial.println(s);
-
-  Serial.print("Contrl:  ");
-  print2Digits(registers[14], 16);
-  Serial.print(":   ");
-  sprint_bits(registers[14], CONTROL_NAMES, s);
-  Serial.println(s);
-  Serial.print("Status:  ");
-  print2Digits(registers[15], 16);
-  Serial.print(":   ");
-  sprint_bits(registers[15], STATUS_NAMES, s);
-  Serial.println(s);
-  Serial.print("Aging:   ");
-  print2Digits(registers[16], 16);
-  Serial.print(":   ");
-  Serial.println(*(int8_t *)(registers + 16));
-
-  Serial.print("Temp: ");
-  print2Digits(registers[17], 16);
-  Serial.print(" ");
-  print2Digits(registers[18], 16);
-  Serial.print(":   ");
-  Serial.print(*(int8_t *)(registers + 17));
-  Serial.print(".");
-  Serial.println(25 * (registers[18] >> 6));
-  Serial.println();
-}
-
-void sprint_alarm(uint8_t *regs, char *s) {
+void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
   // Format the status of alarm from the 4 bytes (0 + 3 bytes for Alarm 2).
-  int8_t secs = BCDTODEC(regs[0] & 0x7F);
+  int8_t secs = 0;
+  int8_t mode = 0;
+  // Alarm2 has no seconds register, so only try to access if it's there.
+  if (has_secs) {
+    secs = BCDTODEC(regs[0] & 0x7F);
+    mode = regs[0] >> 7;
+  } else {
+    // Alarm2, take seconds register as zero.
+    regs -= 1;  // To make remaining registers line up.
+  }
   int8_t mins = BCDTODEC(regs[1] & 0x7F);
   int8_t hours = BCDTODEC(regs[2] & 0x7F);
   int8_t days = BCDTODEC(regs[3] & 0x3F);
-  int8_t mode = ((regs[3] >> 7) << 3) | ((regs[2] >> 7) << 2) | ((regs[1] >> 7) << 1) | ((regs[0] >> 7) << 0);
+  mode |= ((regs[3] >> 7) << 3) | ((regs[2] >> 7) << 2) | ((regs[1] >> 7) << 1);
   int8_t daynotdate = (regs[3] >> 6) & 0x01;
   switch (mode) {
     case 0xF:
@@ -427,11 +411,76 @@ void sprint_alarm(uint8_t *regs, char *s) {
     }
 }
 
+char *CONTROL_NAMES[8] = {"/EOSC", "BBSQW", "CONV", "RS2", "RS1", "INTCN", "A2IE", "A1IE"};
+char *STATUS_NAMES[8] = {"OSF", "x", "x", "x", "EN32", "BSY", "A2F", "A1F"};
+
+void print_registers_fancy(uint8_t *registers) {
+  // registers is return from get_registers.
+  // Print date/time.
+  char s[70];  // Needed for longest sprint_bits.
+  Serial.print("Time:");
+  for (int i=0; i < 7; ++i) {
+    Serial.print(" ");
+    print2Digits(registers[i], 16);
+  }
+  // Format the date/time
+  DateTime dt;
+  dt = ds3231_regs_to_datetime(registers);
+  sprint_datetime(dt, s);  
+  Serial.print(":   ");
+  Serial.println(s);
+
+  Serial.print("Alarm1:       ");
+  for (int i = 7; i < 11; ++i) {
+    Serial.print(" ");
+    print2Digits(registers[i], 16);
+  }
+  // Format the alarm.
+  sprint_alarm(registers + 7, s);
+  Serial.print(":   ");
+  Serial.println(s);
+ 
+  Serial.print("Alarm2:          ");
+  for (int i = 11; i < 14; ++i) {
+    Serial.print(" ");
+    print2Digits(registers[i], 16);
+  }
+  // Format Alarm2 (no seconds register).
+  sprint_alarm(registers + 11, s, /* has seconds= */false);
+  Serial.print(":   ");
+  Serial.println(s);
+
+  Serial.print("Contrl:  ");
+  print2Digits(registers[14], 16);
+  Serial.print(":   ");
+  sprint_bits(registers[14], CONTROL_NAMES, s);
+  Serial.println(s);
+  Serial.print("Status:  ");
+  print2Digits(registers[15], 16);
+  Serial.print(":   ");
+  sprint_bits(registers[15], STATUS_NAMES, s);
+  Serial.println(s);
+  Serial.print("Aging:   ");
+  print2Digits(registers[16], 16);
+  Serial.print(":   ");
+  Serial.println(*(int8_t *)(registers + 16));
+
+  Serial.print("Temp: ");
+  print2Digits(registers[17], 16);
+  Serial.print(" ");
+  print2Digits(registers[18], 16);
+  Serial.print(":   ");
+  Serial.print(*(int8_t *)(registers + 17));
+  Serial.print(".");
+  Serial.println(25 * (registers[18] >> 6));
+  Serial.println();
+}
+
 // -------------------------------------------------------------------
 // Input commands over serial line
 
-// Flag as to whether to repeatedly read time.
-bool enable_polling = false;
+// ms to pause between polling calls.  0=disable polling.
+int polling_interval = 0;
 
 // Flag as to whether to respond to a falling edge on sqwvPin by reading time.
 bool enable_sqwv_int = true;
@@ -546,7 +595,7 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm=1) {
 
 void cmd_prompt() {
   Serial.println("***Cmd: Ann/Bx/Cx/D/Ex/Ix/Lxxx/Mxxx/Px/Qx/R/Sx/T1/Zxxx");
-  Serial.flush();
+  //Serial.flush();
 }
 
 const int16_t ds3231_freqs[4] = {1, 1024, 4096, 8192};
@@ -558,7 +607,7 @@ void handle_cmd(char cmd, char * arg) {
   bool b; // In case we need it.
   int value; // In case we need it.
   DateTime dt; // In case we need it.
-  char s[32]; // In case we need it.
+  char s[64]; // In case we need it.
   uint8_t regs[4];  // In case we need it.
   int alen = strlen(arg);
   switch (cmd) {
@@ -602,6 +651,9 @@ void handle_cmd(char cmd, char * arg) {
     uint8_t registers[19];
     get_registers(registers);
     print_registers_fancy(registers);
+    //dt = ds3231_regs_to_datetime(registers);
+    //sprint_datetime(dt, s);  
+    //Serial.println(s);
     break;
     
    case 'E':
@@ -647,7 +699,7 @@ void handle_cmd(char cmd, char * arg) {
       // setAlarm only works when INTCN (bit 2 of control) is set.
       ctrl = read_register(DS3231_CONTROL);
       if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl | 0x04);
-      ds3231.setAlarm1(dt, mode);      
+      ds3231.setAlarm1(dt, (Ds3231Alarm1Mode)mode);      
       // Restore conv bit
       if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl);
     }
@@ -675,7 +727,7 @@ void handle_cmd(char cmd, char * arg) {
       // setAlarm only works when INTCN (bit 2 of control) is set.
       ctrl = read_register(DS3231_CONTROL);
       if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl | 0x04);
-      ds3231.setAlarm2(dt, mode);
+      ds3231.setAlarm2(dt, (Ds3231Alarm2Mode)mode);
       // Restore conv bit
       if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl);
     }
@@ -689,9 +741,10 @@ void handle_cmd(char cmd, char * arg) {
    case 'P':
     // Enable/disable continuous polling of time across I2C.
     if (alen) {
-      enable_polling = atob(arg);
+      polling_interval = atoi(arg);
     }
-    print_enabled_disabled("Polling", enable_polling);
+    Serial.print("Polling interval (ms, 0=disabled)=");
+    Serial.println(polling_interval);
     break;
     
    case 'Q':
@@ -786,6 +839,9 @@ void cmd_update(void) {
 
 void setup()
 {
+  // Configure the PPS input pin
+  pinMode(sqwvPin, INPUT_PULLUP); // Set alarm pin as pullup
+
   // Start the I2C interface
 
   Serial.begin(9600);
@@ -817,8 +873,11 @@ void setup()
      Serial.println("RTC has set the system time");
 
   Serial.print("DS3231 ");
-  print_registers();
+  uint8_t registers[19];
+  get_registers(registers);
+  print_registers(registers);
   Serial.println();
+  //print_registers_fancy(registers);
 
   cmd_setup();
   setup_interrupts();
@@ -832,7 +891,7 @@ void loop()
 
   cmd_update();
 
-  if (enable_polling || (enable_sqwv_int && (last_rtc_micros != rtc_micros))) {
+  if (polling_interval || (enable_sqwv_int && (last_rtc_micros != rtc_micros))) {
     last_rtc_micros = rtc_micros;
     DateTime dt = DateTime(myTZ.toLocal(ds3231.now().unixtime()));
     int now_sec = dt.second();
@@ -842,5 +901,5 @@ void loop()
     }
   }
   
-  delay(20);
+  delay(polling_interval);
 }
