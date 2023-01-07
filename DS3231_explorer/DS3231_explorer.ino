@@ -97,6 +97,12 @@ const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backligh
 
 #define WHITE ST77XX_WHITE
 #define BLACK ST77XX_BLACK
+#define BLUE  ST77XX_BLUE
+#define RED   ST77XX_RED
+#define GREEN ST77XX_GREEN
+#define CYAN  ST77XX_CYAN
+#define MAGENTA ST77XX_MAGENTA
+#define YELLOW  ST77XX_YELLOW 
 
 #endif
 
@@ -142,20 +148,158 @@ void update_display(DateTime &dt) {
   tft.print(timestr);
 }
 
-void print_bits_tft(uint8_t val, char* names[8]) {
+void print_bits_tft(uint8_t val, char* names[8], uint16_t fgcolor=WHITE, uint16_t bgcolor=BLACK) {
   // Print a bit set using an array of names.
-  uint8_t mask = 0x80;  // Actually start with top bit.
+  uint8_t mask = 0x80;  // Start with top bit.
+  tft.setTextColor(fgcolor, bgcolor);
   for (uint8_t bit = 0; bit < 8; ++bit) {
     bool bitval = ((val & mask) > 0);
     // "Set" bits are printed in reverse video.
-    if (bitval)   tft.setTextColor(BLACK, WHITE);
-    else   tft.setTextColor(WHITE, BLACK);
+    if (bitval)   tft.setTextColor(bgcolor, fgcolor);
     tft.print(names[bit]);
-    if (bitval)   tft.setTextColor(WHITE, BLACK);
+    if (bitval)   tft.setTextColor(fgcolor, bgcolor);
     tft.print(" ");
     mask >>= 1;
   }
 }
+
+void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
+  if (alarm_num == 2) {
+    // Map alarm2 modes to alarm1 modes by shifting left.
+    mode <<= 1;
+  }
+  // Templates are for alarm2; for alarm1, we'll add seconds later.
+  switch (mode) {
+    case DS3231_A1_PerSecond:
+    case DS3231_A1_Second:
+      strcpy(s, "--- --:--");
+      break;
+    case DS3231_A1_Minute:
+      strcpy(s, "--- --:mm");
+      break;
+    case DS3231_A1_Hour:
+      strcpy(s, "--- hh:mm");
+      break;
+    case DS3231_A1_Date:
+      strcpy(s, "-DD hh:mm");
+      break;
+    case DS3231_A1_Day:  // Day of the week.
+      strcpy(s, "DDD hh:mm");
+      break;
+  }
+  if (alarm_num == 1) {
+    // Need to append seconds field.
+    char *s_end = s + strlen(s);
+    if (mode == DS3231_A1_PerSecond) {
+      strcpy(s_end, ":--");
+    } else {
+      strcpy(s_end, ":ss");
+    }
+  }
+}
+
+char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
+char *STATUS_SHORTNAMES[8]  = {"O", "x", "x", "x", "3", "B", "F", "F"};
+
+#ifdef SIZE_1X
+// 1x size
+#define SMALL_SIZE 1
+#define LARGE_SIZE 2
+#define ROW_H 8
+#define CHAR_W 6
+
+#else
+// 2x size
+#define SMALL_SIZE 2
+#define LARGE_SIZE 4
+#define ROW_H 16
+#define CHAR_W 12
+
+#endif
+
+
+void ds3231_display(class RTC_DS3231& ds3231) {
+  // Graphical display of DS3231 state for 16x8 display:
+  // HHHH::MMMM::SSSS
+  // HHHH::MMMM::SSSS (double-size)
+  // 2023-01-06
+  // A1: --- --:03:00 (only enabled shown)
+  // A2: Wed 03:59
+  // C: E Q C R R I E E  (reverse video for set bits)
+  // S: O x x x 3 B F F
+  // A:-127  T:23.25C
+
+  // Regs would be 19 bytes ~ 57 chars incl. spaces
+  // SS MM HH OO DD MM YY  - maybe 7 bytes with N extra pixels between bytes = 7x12 + Nx6 - 96 for N=2, 120 for N=6 (128 is 21 chars @6)
+  // S1 M1 H1 D1 M2 H2 D2
+  // CC SS AO TH TL
+
+  // Time, double size.
+  tft.setTextSize(LARGE_SIZE);
+  tft.setTextColor(WHITE, BLACK);
+  tft.setCursor(0, 0);
+  char s[32];
+  strcpy(s, "hh:mm:ss");
+  ds3231.now().toString(s);
+  tft.print(s);
+
+  // Date, normal size, yellow.
+  tft.setTextSize(SMALL_SIZE);
+  tft.setTextColor(YELLOW, BLACK);
+  tft.setCursor(0, 2 * ROW_H);
+  strcpy(s, "YYYY-MM-DD");
+  ds3231.now().toString(s);
+  tft.print(s);
+
+  // Alarm1
+  tft.setTextColor(CYAN, BLACK);
+  tft.setCursor(0, 3 * ROW_H);
+  strcpy(s, "A1: ");
+  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm1Mode(), /* alarm_num */ 1);  
+  ds3231.getAlarm1().toString(s);
+  tft.print(s);
+
+  // Alarm2
+  tft.setTextColor(BLUE, BLACK);
+  tft.setCursor(0, 4 * ROW_H);
+  strcpy(s, "A2: ");
+  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm2Mode(), /* alarm_num */ 2);  
+  ds3231.getAlarm2().toString(s);
+  tft.print(s);
+
+  // Control byte
+  tft.setTextColor(GREEN, BLACK);
+  tft.setCursor(0, 5 * ROW_H);
+  strcpy(s, "C: ");
+  tft.print(s);
+  print_bits_tft(ds3231_getControlReg(), CONTROL_SHORTNAMES, GREEN, BLACK);
+
+  // Status byte
+  tft.setTextColor(YELLOW, BLACK);
+  tft.setCursor(0, 6 * ROW_H);
+  strcpy(s, "S: ");
+  tft.print(s);
+  print_bits_tft(ds3231_getStatusReg(), STATUS_SHORTNAMES, YELLOW, BLACK);
+
+  // Aging offset
+  tft.setTextColor(RED, BLACK);
+  tft.setCursor(0, 7 * ROW_H);
+  strcpy(s, "A:");
+  itoa(ds3231.getAging(), s + 2, 10);
+  tft.print(s);
+
+  // Temp
+  tft.setTextColor(MAGENTA, BLACK);
+  tft.setCursor(8 * CHAR_W, 7 * ROW_H);
+  strcpy(s, "T:");
+  float t = ds3231.getTemperature();
+  itoa(int(t), s + 2, 10);
+  char *s_end = s + strlen(s);
+  *s_end = '.';
+  itoa(100*(t - int(t)), s_end + 1, 10);
+  tft.print(s);
+}
+
 
 // -------- print redirection --------
 
@@ -247,34 +391,10 @@ Timezone myTZ(myDST, mySTD);
 
 RTC_DS3231 ds3231;
 
-void printByte(byte val)
-{
-  if (val < 16) {
-    // Add a leading zero.
-    Serial.print("0");
-  }
-  Serial.print(val, HEX);
-}
-
-void printBytes(byte *bytes, int n_bytes)
-{
-  for(int i = 0; i < n_bytes; ++i) {
-    printByte(bytes[i]);
-    Serial.print(" ");
-  }
- Serial.println("");
-}
-
 void serial_print_time(const DateTime &dt) {
-  // toString overwrites a format string with the actual date/time.
   char s[20];
   sprint_datetime(dt, s);
   Serial.println(s);
-}
-
-time_t now_local(void) {
-  // Like now(), but includes timezone modification.
-  return myTZ.toLocal(now());
 }
 
 // getExternalTime is declared to expect a function returning a (signed) long int.
@@ -295,7 +415,7 @@ void RTC_set_time(const DateTime& dt) {
 // ------------------------
 void print2Digits(int digits, int base=10, bool to_tft=false)
 {
-  // utility function for digital clock display: prints preceding colon and leading 0
+  // Print a 2-digit value with a leading zero if needed.
   if(digits < base)
     print('0', to_tft);
   print(digits, base, to_tft);
@@ -343,6 +463,14 @@ uint8_t read_register(uint8_t reg) {
   Wire.requestFrom(CLOCK_ADDRESS, 1);
   uint8_t val = Wire.read();
   return val;
+}
+
+uint8_t ds3231_getControlReg() {
+  return read_register(DS3231_CONTROL);
+}
+
+uint8_t ds3231_getStatusReg() {
+  return read_register(DS3231_STATUS);
 }
 
 void get_registers(uint8_t *registers) {
@@ -488,7 +616,7 @@ void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
 }
 
 char *CONTROL_NAMES[8] = {"#EO", "BSQ", "CNV", "RS2", "RS1", "INT", "A2E", "A1E"};
-char *STATUS_NAMES[8] = {"OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F"};
+char *STATUS_NAMES[8]  = {"OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F"};
 
 void print_registers_fancy(uint8_t *registers, bool to_tft=false) {
   // registers is return from get_registers.
@@ -996,7 +1124,8 @@ void loop()
     if (now_sec != last_sec) {
       last_sec = now_sec;
       //update_display(dt);
-      update_display_with_registers();
+      //update_display_with_registers();
+      ds3231_display(ds3231);
     }
   }
   
