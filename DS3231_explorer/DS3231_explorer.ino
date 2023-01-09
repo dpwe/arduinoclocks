@@ -48,85 +48,122 @@
 
 #include <Adafruit_GFX.h>
 
-// #define DISPLAY_SSD1351
-#define DISPLAY_ST7789
+//#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+//#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+#define DISPLAY_SH1107  // 128x64 mono OLED in Feather stack
 
 #ifdef DISPLAY_SSD1351
+  // Arduino - Expect SQWV input on D3
+  const uint8_t sqwvPin = 3;
 
-// Arduino - Expect SQWV input on D3
-const uint8_t sqwvPin = 3;
+  #include <Adafruit_SSD1351.h>
+  // Screen dimensions
+  #define SCREEN_WIDTH  128
+  #define SCREEN_HEIGHT 128 // Change this to 96 for 1.27" OLED.
+  #define SIZE_1X
 
-#include <Adafruit_SSD1351.h>
-// Screen dimensions
-#define SCREEN_WIDTH  128
-#define SCREEN_HEIGHT 128 // Change this to 96 for 1.27" OLED.
+  // Hardware SPI pins 
+  // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be 
+  // an output. 
+  #define DC_PIN   4
+  #define CS_PIN   5
+  #define RST_PIN  6
+  Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
 
-// Hardware SPI pins 
-// (for UNO thats sclk = 13 and sid = 11) and pin 10 must be 
-// an output. 
-#define DC_PIN   4
-#define CS_PIN   5
-#define RST_PIN  6
-Adafruit_SSD1351 tft = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
-
-// Color definitions
-#define BLACK           0x0000
-#define BLUE            0x001F
-#define RED             0xF800
-#define GREEN           0x07E0
-#define CYAN            0x07FF
-#define MAGENTA         0xF81F
-#define YELLOW          0xFFE0  
-#define WHITE           0xFFFF
+  // Color definitions
+  #define BLACK           0x0000
+  #define BLUE            0x001F
+  #define RED             0xF800
+  #define GREEN           0x07E0
+  #define CYAN            0x07FF
+  #define MAGENTA         0xF81F
+  #define YELLOW          0xFFE0  
+  #define WHITE           0xFFFF
 #endif
 
 #ifdef DISPLAY_ST7789
+  // ESP32-S3 TFT - Expect SQWV input on A0
+  const uint8_t sqwvPin = A0;
 
-// ESP32-S3 TFT - Expect SQWV input on A0
-const uint8_t sqwvPin = A0;
+  #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
 
-#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+  #define SCREEN_WIDTH  240
+  #define SCREEN_HEIGHT 135 // Change this to 96 for 1.27" OLED.
+  #define SIZE_2X  // All text double-size
 
-#define SCREEN_WIDTH  240
-#define SCREEN_HEIGHT 135 // Change this to 96 for 1.27" OLED.
+  // Use dedicated hardware SPI pins
+  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-// Use dedicated hardware SPI pins
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
 
-const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
-
-#define WHITE ST77XX_WHITE
-#define BLACK ST77XX_BLACK
-#define BLUE  ST77XX_BLUE
-#define RED   ST77XX_RED
-#define GREEN ST77XX_GREEN
-#define CYAN  ST77XX_CYAN
-#define MAGENTA ST77XX_MAGENTA
-#define YELLOW  ST77XX_YELLOW 
+  #define WHITE ST77XX_WHITE
+  #define BLACK ST77XX_BLACK
+  #define BLUE  ST77XX_BLUE
+  #define RED   ST77XX_RED
+  #define GREEN ST77XX_GREEN
+  #define CYAN  ST77XX_CYAN
+  #define MAGENTA ST77XX_MAGENTA
+  #define YELLOW  ST77XX_YELLOW 
 
 #endif
 
+#ifdef DISPLAY_SH1107
+  // Feather (RP2040) stack - expect SQWV on A2? (external DS3231)
+  const uint8_t sqwvPin = A2;
+
+  #include <Adafruit_SH110X.h>
+  
+  #define SCREEN_WIDTH  128
+  #define SCREEN_HEIGHT 64
+  #define SIZE_1X
+
+  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &Wire1);  // Wire1 is the internal I2C on Feather RP2040
+
+  // Monochrome, all colors are white
+  #define WHITE SH110X_WHITE
+  #define BLACK SH110X_BLACK
+  #define BLUE  WHITE
+  #define RED   WHITE
+  #define GREEN WHITE
+  #define CYAN  WHITE
+  #define MAGENTA WHITE
+  #define YELLOW  WHITE 
+
+#endif
 
 void setup_display(void) {
 #ifdef DISPLAY_SSD1351
-  tft.begin();
+  display.begin();
 #endif
 #ifdef DISPLAY_ST7789
   // turn on backlite
   pinMode(TFT_BACKLITE, OUTPUT);
   analogWrite(TFT_BACKLITE, 128);
 
-  tft.init(135, 240); // Init ST7789 240x135
-  tft.setRotation(3);
+  display.init(135, 240); // Init ST7789 240x135
+  display.setRotation(3);
+#endif
+#ifdef DISPLAY_SH1107
+  display.begin(0x3C, true); // Address 0x3C default
+  display.display();  // Splashscreen
+  delay(500);
+  display.clearDisplay();
+  display.display();
+  display.setRotation(1);
+  display.setTextSize(2);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0,0);
+  display.print("DS3231 Feather");
+  display.display(); // actually display all of the above
 #endif
 
-  tft.fillScreen(BLACK);
+  display.fillScreen(BLACK);
 
   // text display 
-  tft.setTextSize(1);
-  tft.setTextColor(WHITE);
-  tft.setCursor(0,0);
-  tft.print("DS3231_explorer");
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.print("DS3231_explorer");
 }
 
 void sprint_datetime(const DateTime &dt, char *s) {
@@ -136,29 +173,60 @@ void sprint_datetime(const DateTime &dt, char *s) {
 }
 
 void update_display(DateTime &dt) {
-  tft.setTextSize(1);
-  tft.setTextColor(WHITE, BLACK);
-  tft.setCursor(0,0);
+  display.setTextSize(1);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(0,0);
 
   // Format time.
   // toString overwrites a format string with the actual date/time.
   char timestr[20];
   sprint_datetime(dt, timestr);
-  //tft.fillRect(0, 0, 128, 16, BLACK);
-  tft.print(timestr);
+  //display.fillRect(0, 0, 128, 16, BLACK);
+  display.print(timestr);
 }
 
-void print_bits_tft(uint8_t val, char* names[8], uint16_t fgcolor=WHITE, uint16_t bgcolor=BLACK) {
+char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
+char *STATUS_SHORTNAMES[8]  = {"O", "x", "x", "x", "3", "B", "F", "F"};
+
+#ifdef SIZE_1X
+// 1x size
+#define SMALL_SIZE 1
+#define LARGE_SIZE 2
+#define ROW_H 8
+#define CHAR_W 6
+
+#else
+// 2x size
+#define SMALL_SIZE 2
+#define LARGE_SIZE 4
+#define ROW_H 16
+#define CHAR_W 12
+
+#endif
+
+void print_bits_tft(uint16_t x, uint16_t y, uint8_t val, char* names[8], uint16_t fgcolor=WHITE, uint16_t bgcolor=BLACK) {
   // Print a bit set using an array of names.
   uint8_t mask = 0x80;  // Start with top bit.
-  tft.setTextColor(fgcolor, bgcolor);
+  display.setTextColor(fgcolor, bgcolor);
+  display.setCursor(x, y);
   for (uint8_t bit = 0; bit < 8; ++bit) {
     bool bitval = ((val & mask) > 0);
     // "Set" bits are printed in reverse video.
-    if (bitval)   tft.setTextColor(bgcolor, fgcolor);
-    tft.print(names[bit]);
-    if (bitval)   tft.setTextColor(fgcolor, bgcolor);
-    tft.print(" ");
+    if (bitval)   display.setTextColor(bgcolor, fgcolor);
+    display.print(names[bit]);
+    uint16_t w = strlen(names[bit]) * CHAR_W;
+    if (bitval) {
+      display.setTextColor(fgcolor, bgcolor);
+      // Also add top/left edges
+      display.drawFastHLine(x - 1, y - 1, w + 1, fgcolor);
+      display.drawFastVLine(x - 1, y, ROW_H, fgcolor);
+    } else {
+      // Need to undraw the overbar.
+      display.drawFastHLine(x - 1, y - 1, w + 1, bgcolor);
+    }
+    x += w;
+    display.print(" ");
+    x += CHAR_W;
     mask >>= 1;
   }
 }
@@ -198,26 +266,6 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
   }
 }
 
-char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
-char *STATUS_SHORTNAMES[8]  = {"O", "x", "x", "x", "3", "B", "F", "F"};
-
-#ifdef SIZE_1X
-// 1x size
-#define SMALL_SIZE 1
-#define LARGE_SIZE 2
-#define ROW_H 8
-#define CHAR_W 6
-
-#else
-// 2x size
-#define SMALL_SIZE 2
-#define LARGE_SIZE 4
-#define ROW_H 16
-#define CHAR_W 12
-
-#endif
-
-
 void ds3231_display(class RTC_DS3231& ds3231) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
@@ -235,69 +283,73 @@ void ds3231_display(class RTC_DS3231& ds3231) {
   // CC SS AO TH TL
 
   // Time, double size.
-  tft.setTextSize(LARGE_SIZE);
-  tft.setTextColor(WHITE, BLACK);
-  tft.setCursor(0, 0);
+  display.setTextSize(LARGE_SIZE);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(0, 0);
   char s[32];
   strcpy(s, "hh:mm:ss");
   ds3231.now().toString(s);
-  tft.print(s);
+  display.print(s);
 
   // Date, normal size, yellow.
-  tft.setTextSize(SMALL_SIZE);
-  tft.setTextColor(YELLOW, BLACK);
-  tft.setCursor(0, 2 * ROW_H);
+  display.setTextSize(SMALL_SIZE);
+  display.setTextColor(YELLOW, BLACK);
+  display.setCursor(0, 2 * ROW_H);
   strcpy(s, "YYYY-MM-DD");
   ds3231.now().toString(s);
-  tft.print(s);
+  display.print(s);
 
   // Alarm1
-  tft.setTextColor(CYAN, BLACK);
-  tft.setCursor(0, 3 * ROW_H);
+  display.setTextColor(CYAN, BLACK);
+  display.setCursor(0, 3 * ROW_H);
   strcpy(s, "A1: ");
   getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm1Mode(), /* alarm_num */ 1);  
   ds3231.getAlarm1().toString(s);
-  tft.print(s);
+  display.print(s);
 
   // Alarm2
-  tft.setTextColor(BLUE, BLACK);
-  tft.setCursor(0, 4 * ROW_H);
+  display.setTextColor(BLUE, BLACK);
+  display.setCursor(0, 4 * ROW_H);
   strcpy(s, "A2: ");
   getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm2Mode(), /* alarm_num */ 2);  
   ds3231.getAlarm2().toString(s);
-  tft.print(s);
+  display.print(s);
 
   // Control byte
-  tft.setTextColor(GREEN, BLACK);
-  tft.setCursor(0, 5 * ROW_H);
+  display.setTextColor(GREEN, BLACK);
+  display.setCursor(0, 5 * ROW_H);
   strcpy(s, "C: ");
-  tft.print(s);
-  print_bits_tft(ds3231_getControlReg(), CONTROL_SHORTNAMES, GREEN, BLACK);
+  display.print(s);
+  print_bits_tft(3 * CHAR_W, 5 * ROW_H, ds3231_getControlReg(), CONTROL_SHORTNAMES, GREEN, BLACK);
 
   // Status byte
-  tft.setTextColor(YELLOW, BLACK);
-  tft.setCursor(0, 6 * ROW_H);
+  display.setTextColor(YELLOW, BLACK);
+  display.setCursor(0, 6 * ROW_H);
   strcpy(s, "S: ");
-  tft.print(s);
-  print_bits_tft(ds3231_getStatusReg(), STATUS_SHORTNAMES, YELLOW, BLACK);
+  display.print(s);
+  print_bits_tft(3 * CHAR_W, 6 * ROW_H, ds3231_getStatusReg(), STATUS_SHORTNAMES, YELLOW, BLACK);
 
   // Aging offset
-  tft.setTextColor(RED, BLACK);
-  tft.setCursor(0, 7 * ROW_H);
+  display.setTextColor(RED, BLACK);
+  display.setCursor(0, 7 * ROW_H);
   strcpy(s, "A:");
-  itoa(ds3231.getAging(), s + 2, 10);
-  tft.print(s);
+  itoa(ds3231_getAging(), s + 2, 10);
+  display.print(s);
 
   // Temp
-  tft.setTextColor(MAGENTA, BLACK);
-  tft.setCursor(8 * CHAR_W, 7 * ROW_H);
+  display.setTextColor(MAGENTA, BLACK);
+  display.setCursor(8 * CHAR_W, 7 * ROW_H);
   strcpy(s, "T:");
   float t = ds3231.getTemperature();
   itoa(int(t), s + 2, 10);
   char *s_end = s + strlen(s);
   *s_end = '.';
   itoa(100*(t - int(t)), s_end + 1, 10);
-  tft.print(s);
+  display.print(s);
+
+#ifdef DISPLAY_SH1107
+  display.display();
+#endif
 }
 
 
@@ -305,7 +357,7 @@ void ds3231_display(class RTC_DS3231& ds3231) {
 
 void print(char *str, bool to_tft=false) {
   if (to_tft) {
-    tft.print(str);
+    display.print(str);
   } else {
     Serial.print(str);
   }
@@ -313,7 +365,7 @@ void print(char *str, bool to_tft=false) {
 
 void println(char *str="", bool to_tft=false) {
   if (to_tft) {
-    tft.println(str);
+    display.println(str);
   } else {
     Serial.println(str);
   }
@@ -321,7 +373,7 @@ void println(char *str="", bool to_tft=false) {
 
 void print(int i, int base, bool to_tft=false) {
   if (to_tft) {
-    tft.print(i, base);
+    display.print(i, base);
   } else {
     Serial.print(i, base);
   }
@@ -329,7 +381,7 @@ void print(int i, int base, bool to_tft=false) {
 
 void println(int i, int base, bool to_tft=false) {
   if (to_tft) {
-    tft.println(i, base);
+    display.println(i, base);
   } else {
     Serial.println(i, base);
   }
@@ -337,7 +389,7 @@ void println(int i, int base, bool to_tft=false) {
 
 void print(char c, bool to_tft=false) {
   if (to_tft) {
-    tft.print(c);
+    display.print(c);
   } else {
     Serial.print(c);
   }
@@ -345,7 +397,7 @@ void print(char c, bool to_tft=false) {
 
 void println(char c, bool to_tft=false) {
   if (to_tft) {
-    tft.println(c);
+    display.println(c);
   } else {
     Serial.println(c);
   }
@@ -399,6 +451,9 @@ void serial_print_time(const DateTime &dt) {
 
 // getExternalTime is declared to expect a function returning a (signed) long int.
 //time_t 
+#ifdef DISPLAY_SH1107  // Needed to compile on M4
+long
+#endif
 long int RTC_utc_get(void) {
   return ds3231.now().unixtime();
 }
@@ -473,6 +528,18 @@ uint8_t ds3231_getStatusReg() {
   return read_register(DS3231_STATUS);
 }
 
+int ds3231_getAging() {
+  return (int8_t)read_register(DS3231_AGING);
+}
+
+void ds3231_setAging(int8_t offset) {
+  // Write the aging register. 
+  // It's a signed 8 bit value, -128..127
+  // Crystal *slows* by approx 0.1 ppm per unit.
+  write_register(DS3231_AGING, (uint8_t)offset);
+}
+
+
 void get_registers(uint8_t *registers) {
   // Read all 19 hex registers and print out.
   // registers must point to 19 free bytes.
@@ -523,9 +590,9 @@ void sprint_bits(uint8_t val, char* names[8], char *s) {
 }
 
 void print_bits(uint8_t val, char* names[8], bool to_tft) {
-  // Print bits.  Special case for to_tft.
+  // Print bits.  Special case for to_display.
   if (to_tft) {
-    print_bits_tft(val, names);
+    print_bits_tft(0, 0, val, names);
   } else {
     char s[70];
     sprint_bits(val, names, s);
@@ -693,9 +760,9 @@ void print_registers_fancy(uint8_t *registers, bool to_tft=false) {
 }
 
 void update_display_with_registers() {
-  tft.setTextSize(1);
-  tft.setTextColor(WHITE, BLACK);
-  tft.setCursor(0,0);
+  display.setTextSize(1);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(0,0);
 
   uint8_t registers[19];
   get_registers(registers);
@@ -842,10 +909,10 @@ void handle_cmd(char cmd, char * arg) {
     // Get/set aging offset.
     if (alen) {
       value = atoi(arg);
-      ds3231.setAging(value);
+      ds3231_setAging(value);
     }
     Serial.print("Aging offset=");
-    Serial.println((int8_t)ds3231.getAging());
+    Serial.println((int8_t)ds3231_getAging());
     break;
     
    case 'B':
@@ -1063,8 +1130,13 @@ void cmd_update(void) {
 
 // -----------------------------------------
 
+const int ledPin = 13; // On-board LED
+
 void setup()
 {
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, HIGH);
+
   // Configure the PPS input pin
   pinMode(sqwvPin, INPUT_PULLUP); // Set alarm pin as pullup
 
@@ -1082,10 +1154,15 @@ void setup()
   Serial.print(" ");
   Serial.println(__TIME__);
 
+  // Configure Pico RP2040 I2C
+const int ext_sda_pin = 24;
+const int ext_scl_pin = 25;
+  Wire.setSDA(ext_sda_pin);
+  Wire.setSCL(ext_scl_pin);
+  Wire.begin();
   // Wire is initialized inside OLED display
-  //Wire.begin();
+  //Wire1.begin();
 
-  setup_display();
 
   if (!ds3231.begin(&Wire)) {
     Serial.println("Couldn't find RTC");
@@ -1105,11 +1182,15 @@ void setup()
   Serial.println();
   //print_registers_fancy(registers);
 
+  setup_display();
+
   cmd_setup();
   setup_interrupts();
 }
 
 unsigned long last_rtc_micros = 0;
+
+bool led_state = true;
 
 int last_sec = 0;
 void loop()
@@ -1126,6 +1207,8 @@ void loop()
       //update_display(dt);
       //update_display_with_registers();
       ds3231_display(ds3231);
+      led_state = !led_state;
+      digitalWrite(ledPin, led_state);      
     }
   }
   
