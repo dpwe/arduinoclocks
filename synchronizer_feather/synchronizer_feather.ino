@@ -40,7 +40,7 @@ const int ext_sqwPin = 29; // (A3) SQWV output from DS3231
 //#define Wire Wire1
 const int int_sda_pin = 2;
 const int int_scl_pin = 3;
-const int int_sqwPin = 26; // (A0) SQWV output from Feather (internal) DS3231
+const int int_sqwPin = 27; // (A1) SQWV output from Feather (internal) DS3231
 //#endif // DS3231_ON_EXTERNAL_I2C
 
 
