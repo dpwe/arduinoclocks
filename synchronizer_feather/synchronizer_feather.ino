@@ -13,9 +13,10 @@
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
 
 // Wiring:
-//   GPS tx out      -> D0 (for Serial1 RX)
-//   GPS 1PPS out    -> A2 (GP28)
-//   DS3231 SQWV out -> A3 (GP29)
+//   GPS tx out                      -> D0 (for Serial1 RX)
+//   int DS3231 SQWV out (pale blue) -> A1 (GP27)
+//   GPS 1PPS out    (green)         -> A2 (GP28)
+//   ext DS3231 SQWV out             -> A3 (GP29)
 
 const int ppsPin = 28; // (A2) PPS output from GPS board
 const int ledPin = 13; // On-board LED
@@ -34,7 +35,7 @@ const int ledPin = 13; // On-board LED
 //#ifdef DS3231_ON_EXTERNAL_I2C
 const int ext_sda_pin = 24;
 const int ext_scl_pin = 25;
-const int ext_sqwPin = 29; // (A3) SQWV output from DS3231
+const int ext_sqwPin = 29; // (A3) SQWV output from external DS3231
 //#else
 // If using standard Feather I2C...
 //#define Wire Wire1
@@ -600,6 +601,9 @@ char *sprint_clock_comparison(char *s, class Clock& clock, class Clock& ref_cloc
   //strcpy(s, "ppm ");
   //s += strlen(s);
   if (clock.ppm_tracking_) {
+    // A positive ppm means ref clock has more nanosecs per tick than comparison clock
+    // i.e. comparison clock is running fast (and so aging register loading should be
+    // increased).
     s = sprint_int(s, ref_clock.nanoseconds_error_per_sec_ - clock.nanoseconds_error_per_sec_, /* dp */ 3);
     strcpy(s, "ppm/");
     s += strlen(s);
