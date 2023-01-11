@@ -41,7 +41,6 @@
 #include <SPI.h>
 #include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
 
-#include <Timezone.h>       // https://github.com/JChristensen/Timezone
 #include <RTClib.h>         // Adafruit; defines RTC_DS3231
 
 // ------------- Display ---------------
@@ -49,8 +48,8 @@
 #include <Adafruit_GFX.h>
 
 //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
-//#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
-#define DISPLAY_SH1107  // 128x64 mono OLED in Feather stack
+#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+//#define DISPLAY_SH1107  // 128x64 mono OLED in Feather stack
 
 #ifdef DISPLAY_SSD1351
   // Arduino - Expect SQWV input on D3
@@ -320,20 +319,20 @@ void ds3231_display(class RTC_DS3231& ds3231) {
   display.setCursor(0, 5 * ROW_H);
   strcpy(s, "C: ");
   display.print(s);
-  print_bits_tft(3 * CHAR_W, 5 * ROW_H, ds3231_getControlReg(), CONTROL_SHORTNAMES, GREEN, BLACK);
+  print_bits_tft(3 * CHAR_W, 5 * ROW_H, ds3231.getControlReg(), CONTROL_SHORTNAMES, GREEN, BLACK);
 
   // Status byte
   display.setTextColor(YELLOW, BLACK);
   display.setCursor(0, 6 * ROW_H);
   strcpy(s, "S: ");
   display.print(s);
-  print_bits_tft(3 * CHAR_W, 6 * ROW_H, ds3231_getStatusReg(), STATUS_SHORTNAMES, YELLOW, BLACK);
+  print_bits_tft(3 * CHAR_W, 6 * ROW_H, ds3231.getStatusReg(), STATUS_SHORTNAMES, YELLOW, BLACK);
 
   // Aging offset
   display.setTextColor(RED, BLACK);
   display.setCursor(0, 7 * ROW_H);
   strcpy(s, "A:");
-  itoa(ds3231_getAging(), s + 2, 10);
+  itoa(ds3231.getAging(), s + 2, 10);
   display.print(s);
 
   // Temp
@@ -420,21 +419,13 @@ void setup_interrupts() {
 
 // -------------- Time --------------------
 
-// US Eastern Time Zone (New York, Detroit)
-TimeChangeRule myDST = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
-TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
-// US Pacific Time Zone (Las Vegas, Los Angeles)
-//TimeChangeRule myDST = {"PDT", Second, Sun, Mar, 2, -420};
-//TimeChangeRule mySTD = {"PST", First, Sun, Nov, 2, -480};
-Timezone myTZ(myDST, mySTD);
-
 #define CLOCK_ADDRESS 0x68
 
 #define DS3231_TIME 0x00      ///< Time register
 #define DS3231_ALARM1 0x07    ///< Alarm 1 register
 #define DS3231_ALARM2 0x0B    ///< Alarm 2 register
 #define DS3231_CONTROL 0x0E   ///< Control register
-#define DS3231_STATUS 0x0F ///< Status register
+#define DS3231_STATUSREG 0x0F ///< Status register
 #define DS3231_AGING 0x10     ///< Aging offset register
 #define DS3231_TEMPERATUREREG 0x11 ///< Temperature register (high byte - low byte is at 0x12), 10-bit
                               ///< temperature value
@@ -451,7 +442,7 @@ void serial_print_time(const DateTime &dt) {
 
 // getExternalTime is declared to expect a function returning a (signed) long int.
 //time_t 
-#ifdef DISPLAY_SH1107  // Needed to compile on M4
+#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
 long
 #endif
 long int RTC_utc_get(void) {
@@ -464,7 +455,7 @@ void RTC_set_time(const DateTime& dt) {
   serial_print_time(dt);
   ds3231.adjust(dt);
   // Resync TimeLib
-  setTime(ds3231.now().unixtime());
+  //setTime(ds3231.now().unixtime());
 }
 
 // ------------------------
@@ -519,26 +510,6 @@ uint8_t read_register(uint8_t reg) {
   uint8_t val = Wire.read();
   return val;
 }
-
-uint8_t ds3231_getControlReg() {
-  return read_register(DS3231_CONTROL);
-}
-
-uint8_t ds3231_getStatusReg() {
-  return read_register(DS3231_STATUS);
-}
-
-int ds3231_getAging() {
-  return (int8_t)read_register(DS3231_AGING);
-}
-
-void ds3231_setAging(int8_t offset) {
-  // Write the aging register. 
-  // It's a signed 8 bit value, -128..127
-  // Crystal *slows* by approx 0.1 ppm per unit.
-  write_register(DS3231_AGING, (uint8_t)offset);
-}
-
 
 void get_registers(uint8_t *registers) {
   // Read all 19 hex registers and print out.
@@ -909,10 +880,10 @@ void handle_cmd(char cmd, char * arg) {
     // Get/set aging offset.
     if (alen) {
       value = atoi(arg);
-      ds3231_setAging(value);
+      ds3231.setAging(value);
     }
     Serial.print("Aging offset=");
-    Serial.println((int8_t)ds3231_getAging());
+    Serial.println((int8_t)ds3231.getAging());
     break;
     
    case 'B':
@@ -929,12 +900,12 @@ void handle_cmd(char cmd, char * arg) {
     
    case 'C':
     // Enable/disable 32 kHz output (bit 3 of STATUS).
-    status = read_register(DS3231_STATUS);
+    status = read_register(DS3231_STATUSREG);
     if (alen) {
       b = atob(arg);
       if (b) status |= 0x08;
       else   status &= (0xFF - 0x08);
-      write_register(DS3231_STATUS, status);
+      write_register(DS3231_STATUSREG, status);
     }
     print_enabled_disabled("32 kHz output", status & 0x08);
     break;
@@ -1056,9 +1027,9 @@ void handle_cmd(char cmd, char * arg) {
     
    case 'R':
     // Reset OSF, A1F, A2F (bits 7, 1, 0 of STATUS).
-    status = read_register(DS3231_STATUS);
+    status = read_register(DS3231_STATUSREG);
     status &= (0xFF - 0x83);
-    write_register(DS3231_STATUS, status);
+    write_register(DS3231_STATUSREG, status);
     Serial.println("OSF, A1F, A2F cleared.");
     break;
     
@@ -1154,6 +1125,7 @@ void setup()
   Serial.print(" ");
   Serial.println(__TIME__);
 
+#ifdef ARDUINO_ARCH_RP2040
   // Configure Pico RP2040 I2C
 const int ext_sda_pin = 24;
 const int ext_scl_pin = 25;
@@ -1162,18 +1134,13 @@ const int ext_scl_pin = 25;
   Wire.begin();
   // Wire is initialized inside OLED display
   //Wire1.begin();
-
+#endif
 
   if (!ds3231.begin(&Wire)) {
     Serial.println("Couldn't find RTC");
     Serial.flush();
     abort();
   }
-  setSyncProvider(RTC_utc_get);   // the function to get the time from the RTC
-  if(timeStatus()!= timeSet)
-     Serial.println("Unable to sync with the RTC");
-  else
-     Serial.println("RTC has set the system time");
 
   Serial.print("DS3231 ");
   uint8_t registers[19];
@@ -1200,7 +1167,7 @@ void loop()
 
   if (polling_interval || (enable_sqwv_int && (last_rtc_micros != rtc_micros))) {
     last_rtc_micros = rtc_micros;
-    DateTime dt = DateTime(myTZ.toLocal(ds3231.now().unixtime()));
+    DateTime dt = ds3231.now();
     int now_sec = dt.second();
     if (now_sec != last_sec) {
       last_sec = now_sec;

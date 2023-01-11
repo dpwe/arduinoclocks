@@ -11,7 +11,7 @@
     @return True if Wire can find DS1307 or false otherwise.
 */
 /**************************************************************************/
-boolean RTC_DS1307::begin(TwoWire *wireInstance) {
+bool RTC_DS1307::begin(TwoWire *wireInstance) {
   if (i2c_dev)
     delete i2c_dev;
   i2c_dev = new Adafruit_I2CDevice(DS1307_ADDRESS, wireInstance);
@@ -35,11 +35,11 @@ uint8_t RTC_DS1307::isrunning(void) { return !(read_register(0) >> 7); }
 */
 /**************************************************************************/
 void RTC_DS1307::adjust(const DateTime &dt) {
-  uint8_t buffer[8] = {0,  // The register address
+  uint8_t buffer[8] = {0,
                        bin2bcd(dt.second()),
                        bin2bcd(dt.minute()),
                        bin2bcd(dt.hour()),
-                       0,  // DOW - not set
+                       0,
                        bin2bcd(dt.day()),
                        bin2bcd(dt.month()),
                        bin2bcd(dt.year() - 2000U)};

@@ -340,7 +340,9 @@ protected:
   static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
   Adafruit_I2CDevice *i2c_dev = NULL; ///< Pointer to I2C bus interface
   uint8_t read_register(uint8_t reg);
+  void read_registers(uint8_t reg, uint8_t* buffer, uint8_t num);
   void write_register(uint8_t reg, uint8_t val);
+  void write_registers(uint8_t reg, uint8_t* buffer, uint8_t num);
 };
 
 /**************************************************************************/
@@ -350,7 +352,7 @@ protected:
 /**************************************************************************/
 class RTC_DS1307 : RTC_I2C {
 public:
-  boolean begin(TwoWire *wireInstance = &Wire);
+  bool begin(TwoWire *wireInstance = &Wire);
   void adjust(const DateTime &dt);
   uint8_t isrunning(void);
   DateTime now();
@@ -369,7 +371,7 @@ public:
 /**************************************************************************/
 class RTC_DS3231 : RTC_I2C {
 public:
-  boolean begin(TwoWire *wireInstance = &Wire);
+  bool begin(TwoWire *wireInstance = &Wire);
   void adjust(const DateTime &dt);
   bool lostPower(void);
   DateTime now();
@@ -377,6 +379,10 @@ public:
   void writeSqwPinMode(Ds3231SqwPinMode mode);
   bool setAlarm1(const DateTime &dt, Ds3231Alarm1Mode alarm_mode);
   bool setAlarm2(const DateTime &dt, Ds3231Alarm2Mode alarm_mode);
+  DateTime getAlarm1();
+  DateTime getAlarm2();
+  Ds3231Alarm1Mode getAlarm1Mode();
+  Ds3231Alarm2Mode getAlarm2Mode();
   void disableAlarm(uint8_t alarm_num);
   void clearAlarm(uint8_t alarm_num);
   bool alarmFired(uint8_t alarm_num);
@@ -384,6 +390,12 @@ public:
   void disable32K(void);
   bool isEnabled32K(void);
   float getTemperature(); // in Celsius degree
+  int8_t getAging();
+  void setAging(int8_t val);
+  uint8_t getControlReg();
+  void setControlReg(uint8_t val);
+  uint8_t getStatusReg();
+  void setStatusReg(uint8_t val);
   /*!
       @brief  Convert the day of the week to a representation suitable for
               storing in the DS3231: from 1 (Monday) to 7 (Sunday).
@@ -401,10 +413,10 @@ public:
 /**************************************************************************/
 class RTC_PCF8523 : RTC_I2C {
 public:
-  boolean begin(TwoWire *wireInstance = &Wire);
+  bool begin(TwoWire *wireInstance = &Wire);
   void adjust(const DateTime &dt);
-  boolean lostPower(void);
-  boolean initialized(void);
+  bool lostPower(void);
+  bool initialized(void);
   DateTime now();
   void start(void);
   void stop(void);
@@ -428,8 +440,8 @@ public:
 /**************************************************************************/
 class RTC_PCF8563 : RTC_I2C {
 public:
-  boolean begin(TwoWire *wireInstance = &Wire);
-  boolean lostPower(void);
+  bool begin(TwoWire *wireInstance = &Wire);
+  bool lostPower(void);
   void adjust(const DateTime &dt);
   DateTime now();
   void start(void);

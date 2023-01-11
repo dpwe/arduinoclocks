@@ -83,6 +83,40 @@ uint8_t RTC_I2C::read_register(uint8_t reg) {
 }
 
 /**************************************************************************/
+/*!
+    @brief Read multiple values starting from register.
+    @param reg register address
+    @param buffer pointer to result buffer
+    @param num number of values to read
+*/
+/**************************************************************************/
+void RTC_I2C::read_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
+  // Put register index in first byte of buffer, overwritten on read.
+  buffer[0] = reg;
+  i2c_dev->write_then_read(buffer, 1, buffer, num);
+}
+
+/**************************************************************************/
+/*!
+    @brief Write multiple values starting from register.
+    @param reg register address
+    @param buffer pointer to values to write
+    @param num number of values to write
+*/
+/**************************************************************************/
+void RTC_I2C::write_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
+  uint8_t my_buffer[20];
+  assert(num <= 19);
+  // We need to assemble a single buffer with reg followed by payload.
+  my_buffer[0] = reg;
+  for (int i = 0; i < num; ++i) {
+    my_buffer[1 + i] = buffer[i];
+  }
+  i2c_dev->write(my_buffer, num + 1);
+}
+  
+
+/**************************************************************************/
 // utility code, some of this could be exposed in the DateTime API if needed
 /**************************************************************************/
 
