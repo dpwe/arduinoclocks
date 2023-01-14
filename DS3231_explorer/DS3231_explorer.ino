@@ -480,8 +480,9 @@ void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
         const char dow[] = "SunMonTueWedThuFriSat";
         strcpy(s, "every ");
         s += strlen(s);
+        days %= 7;  // Ensure 0 (Sun) to 6 (Sat).
         for (int i = 0; i < 3; ++i) {
-          s[i] = dow[3*(days - 1) + i];
+          s[i] = dow[3*days + i];
         }
         s[3] = '\0';
         s += strlen(s);
@@ -703,7 +704,7 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm=1) {
   if (ix == 1) {
     // Weekday.
     daynotdate = true;
-    day = arg[ix] - '0';
+    day = 1 + (arg[ix - 1] - '0' + 6) % 7;   // 1 (Mon) .. 7 (Sun).
     mode = DS3231_A1_Day;
   } else if (ix == 2) {
     // Day of month
@@ -718,7 +719,8 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm=1) {
     mode >>= 1;
   }
   *pmode = mode;
-  return DateTime(2000, 1, day, hr, min, sec);
+  // Following RTC_DS3231, the May 2000 started on a Monday, so date == DoW.
+  return DateTime(2000, 5, day, hr, min, sec);
 }
 
 void cmd_prompt() {
@@ -728,7 +730,6 @@ void cmd_prompt() {
 
 // Macro to set or clear bits specified by bitmask in a register.
 #define SET_BIT_IN_REG_TO(reg, bitmask, val)  if (val) reg |= (bitmask); else reg &= ~(bitmask);
-
 
 const int16_t ds3231_freqs[4] = {1, 1024, 4096, 8192};
 
