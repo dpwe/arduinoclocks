@@ -396,8 +396,8 @@ public:
   void setControlReg(uint8_t val);
   uint8_t getStatusReg();
   void setStatusReg(uint8_t val);
-  void getRegisters(uint8_t *buf, uint8_t num);  // Reads up to 19 bytes.
-  void setRegisters(const uint8_t *buf, uint8_t num);  // Sets up to 19 bytes
+  void getRegisters(uint8_t *buf, uint8_t num, uint8_t start=0);  // Reads up to 19 bytes.
+  void setRegisters(const uint8_t *buf, uint8_t num, uint8_t start=0);  // Sets up to 19 bytes
 
   /*!
       @brief  Convert the day of the week to a representation suitable for

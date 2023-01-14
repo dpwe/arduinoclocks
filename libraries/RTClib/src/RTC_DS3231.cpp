@@ -176,22 +176,26 @@ void RTC_DS3231::setStatusReg(uint8_t val) {
 /*!
     @brief  Get the current value of all the registers.
     @param  buf Pre-allocated buffer to write the registers into
-    @num    num Number of bytes to read (and size of buf).  Up to 19.
+    @param  num Number of bytes to read (and size of buf).  Up to 19.
+    @param  start Address of first register to read (default 0).
 */
 /**************************************************************************/
-void RTC_DS3231::getRegisters(uint8_t *buf, uint8_t num) {
-  read_registers(/* start register */ 0, buf, num);
+void RTC_DS3231::getRegisters(uint8_t *buf, uint8_t num, 
+                              uint8_t start /* =0 */) {
+  read_registers(start, buf, num);
 }
 
 /**************************************************************************/
 /*!
     @brief  Write new values to all the registers at once.
     @param  buf Buffer containing all the new register values.
-    @num    num Number of bytes to write (and size of buf).  Up to 19.
+    @param  num Number of bytes to write (and size of buf).  Up to 19.
+    @param  start Address of first register to write (default 0).
 */
 /**************************************************************************/
-void RTC_DS3231::setRegisters(const uint8_t *buf, uint8_t num){
-  write_registers(/* start register */ 0, buf, num);
+void RTC_DS3231::setRegisters(const uint8_t *buf, uint8_t num, 
+                              uint8_t start /* =0 */){
+  write_registers(start, buf, num);
 }
 
 /**************************************************************************/
