@@ -14,6 +14,28 @@
      A5  I2C Clock
      D3  SQWV/_INT output
 
+  DESIGN
+
+  For greatest accuracy, the RTC state needs to update as soon as possible
+  after a "tick" event, either from internal or external hardware timers.  
+  To avoid processing delay, we precompute the state *at the next second*
+  and set up a "double buffered" set of registered.  Then, when the "tick"
+  interrupt occurs, we switch the register pointer to the precomputed set, 
+  and update the output pin (as appropriate).  Then, back in the foreground
+  loop, we notice that the time has changed, and set up for the next tick.
+
+  Any configuration change (writing to registers) triggers a recompute of
+  the next-tick state.
+
+  The synchronization to the hardware timer is reset when the seconds
+  register is written (only).
+
+  Note, registers can be written "at any time" by i2c transactions.  In
+  theory this can affect derived state, for instance alarm trigger state. 
+  We have to avoid race conditions where registers are modified, but then
+  a tick causes a double-buffer swap before the new register values are 
+  propagated to the setup for the next tick.
+
   dpwe@google.com 2022-12-31
 */
 
@@ -33,6 +55,7 @@
 #define DS3231_TEMPERATUREREG                                                  \
   0x11 ///< Temperature register (high byte - low byte is at 0x12), 10-bit
        ///< temperature value
+#define DS3231_OUTPINSTATE    0x12 /// We use this byte to store the output pin state.  It's not in the chip.
 
 #define DS3231_C_A1IE 0  // Alarm 1 Interrupt Enable is bit 0 of Control
 #define DS3231_C_A2IE 1  // Alarm 2 Interrupt Enable
@@ -41,6 +64,58 @@
 #define DS3231_S_A1F 0  // Alarm 1 Fired is bit 0 of Status
 #define DS3231_S_A2F 1  // Alarm 2 Fired is bit 1 of Status
 
+// ------ Counter timer ------
+
+// Use the hardware timer in the ESP32 to provide accurate PPS ticks.
+
+uint32_t counter_ticks_between_firings = 1000000;  // Counter is microseconds.
+
+uint32_t timer_next_firing = 0;
+
+// Nanosecs per sec is ppb trim.
+int32_t nanosecs_per_sec_trim = 0;
+volatile int32_t cumulated_nanos = 0;
+
+hw_timer_t * timer = NULL;
+
+// Forward-declare the function that advances the clock.
+void clock_tick(void);
+
+void ARDUINO_ISR_ATTR onTimer(){
+  clock_tick();
+  // Setup for next alarm, including cumulated nanos.
+  cumulated_nanos += nanosecs_per_sec_trim;
+  int micros_offset = cumulated_nanos / 1000;
+  cumulated_nanos += micros_offset * 1000;
+  timerAlarmWrite(timer, counter_ticks_between_firings + micros_offset, true);
+}
+
+void timer_update_trim_ppb(int ppb) {
+  nanosecs_per_sec_trim = ppb;
+}
+
+void timer_setup(void) {
+  // After https://espressif-docs.readthedocs-hosted.com/projects/arduino-esp32/en/latest/api/timer.html
+  // Use 1st timer of 4 (counted from zero).
+  // Set 80 divider for prescaler to get 1us events.
+  timer = timerBegin(0, 80, true);
+
+  // Attach onTimer function to our timer.
+  timerAttachInterrupt(timer, &onTimer, true);
+
+  // Set alarm to call onTimer function every second (value in microseconds).
+  // Repeat the alarm (third parameter)
+  timerAlarmWrite(timer, counter_ticks_between_firings, true);
+
+  // Start an alarm
+  timerAlarmEnable(timer);
+}
+
+void timer_reset_sync(void) {
+  // Happens e.g. when seconds register is written.  Make seconds happen relative to now.
+  timerWrite(timer, 0);
+}
+
 // ----- DS3231 emulation -----
 #include "RTClib.h"  // For DateTime etc.
 static uint8_t bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
@@ -48,16 +123,23 @@ static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
 static uint8_t dowToDS3231(uint8_t d) { return d == 0 ? 7 : d; }
 
 // Space for registers.
-#define NUM_REGISTERS 19
-uint8_t registers[NUM_REGISTERS];
+#define NUM_REGISTERS 20  // 20th address holds target state of SQWV output
+// Double-buffers to allow immediate register updates.
+uint8_t registers0[NUM_REGISTERS];
+uint8_t registers1[NUM_REGISTERS];
+// Current register set.
+uint8_t *registers = registers0;
+uint8_t *registers_next = registers1;
 
 void ds3231_setup() {
   // Zero-out registers.
   for (int i = 0; i < NUM_REGISTERS; ++i) {
     registers[i] = 0;
+    registers_next[i] = 0;
   }
   // Initialize temperature to something plausible, 25.0 C
   registers[DS3231_TEMPERATUREREG] = 25;
+  registers_next[DS3231_TEMPERATUREREG] = 25;
 }
 
 class DateTime decode_time_from_regs(uint8_t *buffer) {
@@ -155,22 +237,12 @@ bool check_alarm_match(DateTime &now, DateTime &alarm, uint8_t alarm_mode) {
   }
 }
 
-// Track whether we have a low pulse on sqwv that needs clearing.
-uint32_t last_sqwv_millis = 0;
-// After how many ms should we return sqwv high?
-const uint32_t sqwv_pulse_ms = 500;
+#define CHECK_BIT(reg, bit) (reg & _BV(bit))
 
-void ds3231_tick(int seconds=1) {
-  // Drive SQWV 1 Hz output if in oscillator mode (ignores RSx bits).
-  if (!(registers[DS3231_CONTROL] & _BV(DS3231_C_INTCN))) {
-    digitalWrite(SQWV_PIN, LOW);
-    // Set up semaphore for the oscillator pulse to be reset later.
-    last_sqwv_millis = millis();
-  }
-  
-  // Add some number of seconds to the internal clock.
+void ds3231_tick(uint8_t *registers) {
+  // Add one second to the internal clock.
   uint32_t time = decode_time_from_regs(registers).unixtime();
-  time += seconds;
+  time += 1;
   DateTime now(time);
   encode_time_to_regs(now, registers);
   
@@ -187,19 +259,37 @@ void ds3231_tick(int seconds=1) {
     registers[DS3231_STATUSREG] |= _BV(DS3231_S_A2F);
   }
 
-  if (registers[DS3231_CONTROL] & _BV(DS3231_C_INTCN)) {
+  // Drive SQWV 1 Hz output if in oscillator mode (ignores RSx bits).
+  if (!CHECK_BIT(registers[DS3231_CONTROL], DS3231_C_INTCN)) {
+    registers[DS3231_OUTPINSTATE] = LOW;
+  } else {
     // Output pin is reflecting interrupts.
     if (registers[DS3231_CONTROL] & registers[DS3231_STATUSREG] & 0x03) {
       // At least one alarm fired bit is set when the corresponding interrupt enable bit is set.
-      digitalWrite(SQWV_PIN, LOW);
+      registers[DS3231_OUTPINSTATE] = LOW;
     } else {
       // No interrupt.
-      digitalWrite(SQWV_PIN, HIGH);
+      registers[DS3231_OUTPINSTATE] = HIGH;
     }
   }
 }
 
+void ds3231_setup_next_tick(void) {
+  // Setup registers_next to be correct for the next tick event.
+  // First, copy current registers to registers_next:
+  for (int i = 0; i < NUM_REGISTERS; ++i) {
+    registers_next[i] = registers[i];
+  }
+  // Then, advance it by 1 second.
+  ds3231_tick(registers_next);
+}
+
+
 // --------- I2C handlers --------------
+// We need to track that the registers have been updated and may not yet
+// have propagated to registers_next.
+volatile bool registers_dirty = false;
+
 uint8_t cursor = 0;  // Address of next register access.
 
 void receiveEvent(int howmany) {
@@ -211,13 +301,17 @@ void receiveEvent(int howmany) {
     uint8_t x = Wire.read();
     if (cursor < NUM_REGISTERS) {
       registers[cursor] = x;
+      if (cursor == 0) {
+        // We wrote the seconds register, reset the timer sync.
+        timer_reset_sync();
+      }
     }
     ++cursor;
   }
+  registers_dirty = true;
 }
 
 void requestEvent() {
-
   // Send a stream of bytes back to master, starting from previous value of cursor until end of registers.
   // I *think* I2C indicates how many bytes it wants by sending a STOP after it's had enough.
   // but this doesn't appear to be visible through Wire.
@@ -238,6 +332,43 @@ void requestEvent() {
   //Serial.println(cursor);
   Wire.write(registers + cursor, NUM_REGISTERS - cursor);
 #endif
+}
+
+// ------- Tick interrupt -------
+
+// Track whether we have a low pulse on sqwv that needs clearing.
+volatile uint32_t last_sqwv_millis = 0;
+// After how many ms should we return sqwv high?
+const uint32_t sqwv_pulse_ms = 500;
+
+// Detect a tick in foreground.
+volatile bool tick_happened = false;
+
+void clock_tick(void) {
+  if (registers_dirty) {
+    // Registers have been modified externally e.g. by i2c_write.
+    // This is normally handled by the foreground task and we specifically don't want to 
+    // do it here, to avoid latency between clock tick and state update.  However, if the
+    // registers *just* got changed by an i2c_write, and we haven't yet propagated to 
+    // registers_next, we need to take care of that here - or we'll lose the register updates.
+    ds3231_setup_next_tick();
+    registers_dirty = false;
+  }
+  // Swap the registers double-buffer.  Do this and update output pin as fast as possible.
+  uint8_t *tmp = registers;
+  registers = registers_next;
+  // Update the output pin.
+  digitalWrite(SQWV_PIN, registers[DS3231_OUTPINSTATE]);
+  registers_next = registers;
+  // Copy the new registers as setup for the next tick.
+  // Record the tick
+  tick_happened = true;
+  if (!CHECK_BIT(registers[DS3231_CONTROL], DS3231_C_INTCN)) {
+    // Set up semaphore for the oscillator pulse to be reset later.
+    last_sqwv_millis = millis();
+  }
+  // Update the trim.
+  timer_update_trim_ppb((int8_t)registers[DS3231_AGING]);
 }
 
 // --------------- setup(), loop() ---------------------
@@ -264,9 +395,8 @@ void setup() {
   Serial.println(__TIME__);
 
   ds3231_setup();
+  timer_setup();
 }
-
-uint32_t last_millis = 0;
 
 void loop() {
   uint32_t now_millis = millis();
@@ -275,10 +405,17 @@ void loop() {
     digitalWrite(SQWV_PIN, HIGH);
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
   }
-  // Should we tick on the clock?
-  if (now_millis - last_millis >= 1000) {
-    last_millis += 1000;
-    ds3231_tick();
+  // If the clock ticked, set up for next second.
+  if (tick_happened) {
+    ds3231_setup_next_tick();
+    tick_happened = false;
+    // Report seconds.
+    Serial.println(registers[0], HEX);
+  }
+  if (registers_dirty) {
+    // Registers have been modified externally e.g. by i2c_write.
+    ds3231_setup_next_tick();
+    registers_dirty = false;
   }
   // Time delay in loop
   delay(10);
