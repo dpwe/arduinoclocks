@@ -149,11 +149,6 @@ void setup_display(void) {
   display.clearDisplay();
   display.display();
   display.setRotation(1);
-  display.setTextSize(2);
-  display.setTextColor(SH110X_WHITE);
-  display.setCursor(0,0);
-  display.print("DS3231 Feather");
-  display.display(); // actually display all of the above
 #endif
 
   display.fillScreen(BLACK);
@@ -163,25 +158,6 @@ void setup_display(void) {
   display.setTextColor(WHITE);
   display.setCursor(0,0);
   display.print("DS3231_explorer");
-}
-
-void sprint_datetime(const DateTime &dt, char *s) {
-  // s must have 20 bytes.
-  strcpy(s, "YYYY-MM-DD hh:mm:ss");
-  dt.toString(s);
-}
-
-void update_display(DateTime &dt) {
-  display.setTextSize(1);
-  display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,0);
-
-  // Format time.
-  // toString overwrites a format string with the actual date/time.
-  char timestr[20];
-  sprint_datetime(dt, timestr);
-  //display.fillRect(0, 0, 128, 16, BLACK);
-  display.print(timestr);
 }
 
 char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
@@ -351,57 +327,6 @@ void ds3231_display(class RTC_DS3231& ds3231) {
 #endif
 }
 
-
-// -------- print redirection --------
-
-void print(char *str, bool to_tft=false) {
-  if (to_tft) {
-    display.print(str);
-  } else {
-    Serial.print(str);
-  }
-}
-
-void println(char *str="", bool to_tft=false) {
-  if (to_tft) {
-    display.println(str);
-  } else {
-    Serial.println(str);
-  }
-}
-
-void print(int i, int base, bool to_tft=false) {
-  if (to_tft) {
-    display.print(i, base);
-  } else {
-    Serial.print(i, base);
-  }
-}
-
-void println(int i, int base, bool to_tft=false) {
-  if (to_tft) {
-    display.println(i, base);
-  } else {
-    Serial.println(i, base);
-  }
-}
-
-void print(char c, bool to_tft=false) {
-  if (to_tft) {
-    display.print(c);
-  } else {
-    Serial.print(c);
-  }
-}
-
-void println(char c, bool to_tft=false) {
-  if (to_tft) {
-    display.println(c);
-  } else {
-    Serial.println(c);
-  }
-}
-
 // -------------- Interrupt ---------------
 
 volatile unsigned long rtc_micros = 0;
@@ -434,6 +359,12 @@ void setup_interrupts() {
 
 RTC_DS3231 ds3231;
 
+void sprint_datetime(const DateTime &dt, char *s) {
+  // s must have 20 bytes.
+  strcpy(s, "YYYY-MM-DD hh:mm:ss");
+  dt.toString(s);
+}
+
 void serial_print_time(const DateTime &dt) {
   char s[20];
   sprint_datetime(dt, s);
@@ -459,12 +390,12 @@ void RTC_set_time(const DateTime& dt) {
 }
 
 // ------------------------
-void print2Digits(int digits, int base=10, bool to_tft=false)
+void print2Digits(int digits, int base=10)
 {
   // Print a 2-digit value with a leading zero if needed.
   if(digits < base)
-    print('0', to_tft);
-  print(digits, base, to_tft);
+    Serial.print('0');
+  Serial.print(digits, base);
 }
 
 void itoa2(int num, char *s, int base=10) {
@@ -560,15 +491,11 @@ void sprint_bits(uint8_t val, char* names[8], char *s) {
   }
 }
 
-void print_bits(uint8_t val, char* names[8], bool to_tft) {
+void print_bits(uint8_t val, char* names[8]) {
   // Print bits.  Special case for to_display.
-  if (to_tft) {
-    print_bits_tft(0, 0, val, names);
-  } else {
-    char s[70];
-    sprint_bits(val, names, s);
-    Serial.print(s);
-  }
+  char s[70];
+  sprint_bits(val, names, s);
+  Serial.print(s);
 }
 
 void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
@@ -656,78 +583,66 @@ void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
 char *CONTROL_NAMES[8] = {"#EO", "BSQ", "CNV", "RS2", "RS1", "INT", "A2E", "A1E"};
 char *STATUS_NAMES[8]  = {"OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F"};
 
-void print_registers_fancy(uint8_t *registers, bool to_tft=false) {
+void print_registers_fancy(uint8_t *registers) {
   // registers is return from get_registers.
   // Print date/time.
   char s[70];  // Needed for longest sprint_bits.
-  print("Time:", to_tft);
+  Serial.print("Time:");
   for (int i=0; i < 7; ++i) {
-    print(' ', to_tft);
-    print2Digits(registers[i], 16, to_tft);
+    Serial.print(' ');
+    print2Digits(registers[i], 16);
   }
   // Format the date/time
   DateTime dt;
   dt = ds3231_regs_to_datetime(registers);
   sprint_datetime(dt, s);
-  if (to_tft) println("", to_tft);
-  else print(": ", to_tft);
-  print("  ", to_tft);
-  println(s, to_tft);
+  Serial.print(":   ");
+  Serial.println(s);
 
-  print("Alarm1: ", to_tft);
-  if (!to_tft) print("      ", to_tft);
+  Serial.print("Alarm1:       ");
   for (int i = 7; i < 11; ++i) {
-    print(' ', to_tft);
-    print2Digits(registers[i], 16, to_tft);
+    Serial.print(' ');
+    print2Digits(registers[i], 16);
   }
   // Format the alarm.
   sprint_alarm(registers + 7, s);
-  if (to_tft) println("", to_tft);
-  else print(": ", to_tft);
-  print("  ", to_tft);
-  println(s, to_tft);
+  Serial.print(":   ");
+  Serial.println(s);
  
-  print("Alarm2: ", to_tft);
-  if (!to_tft)  print("         ", to_tft);
+  Serial.print("Alarm2:          ");
   for (int i = 11; i < 14; ++i) {
-    print(' ', to_tft);
-    print2Digits(registers[i], 16, to_tft);
+    Serial.print(' ');
+    print2Digits(registers[i], 16);
   }
   // Format Alarm2 (no seconds register).
   sprint_alarm(registers + 11, s, /* has seconds= */false);
-  if (to_tft) println("", to_tft);
-  else print(": ", to_tft);
-  print("  ", to_tft);
-  println(s, to_tft);
+  Serial.print(":   ");
+  Serial.println(s);
 
-  print("Contrl:  ", to_tft);
-  print2Digits(registers[14], 16, to_tft);
-  if (to_tft) println("", to_tft);
-  else print(": ", to_tft);
-  print("  ", to_tft);
-  print_bits(registers[14], CONTROL_NAMES, to_tft);
-  println("", to_tft);
-  print("Status:  ", to_tft);
-  print2Digits(registers[15], 16, to_tft);
-  if (to_tft) println("", to_tft);
-  else print(": ", to_tft);
-  print("  ", to_tft);
-  print_bits(registers[15], STATUS_NAMES, to_tft);
-  println("", to_tft);
-  print("Aging:   ", to_tft);
-  print2Digits(registers[16], 16, to_tft);
-  print(":   ", to_tft);
-  println(*(int8_t *)(registers + 16), 10, to_tft);
+  Serial.print("Contrl:  ");
+  print2Digits(registers[14], 16);
+  Serial.print(":   ");
+  print_bits(registers[14], CONTROL_NAMES);
+  Serial.println("");
+  Serial.print("Status:  ");
+  print2Digits(registers[15], 16);
+  Serial.print(":   ");
+  print_bits(registers[15], STATUS_NAMES);
+  Serial.println("");
+  Serial.print("Aging:   ");
+  print2Digits(registers[16], 16);
+  Serial.print(":   ");
+  Serial.println(*(int8_t *)(registers + 16), 10);
 
-  print("Temp: ", to_tft);
-  print2Digits(registers[17], 16, to_tft);
-  print(' ', to_tft);
-  print2Digits(registers[18], 16, to_tft);
-  print(":   ", to_tft);
-  print(*(int8_t *)(registers + 17), 10, to_tft);
-  print('.', to_tft);
-  println(25 * (registers[18] >> 6), 10, to_tft);
-  println("", to_tft);
+  Serial.print("Temp: ");
+  print2Digits(registers[17], 16);
+  Serial.print(' ');
+  print2Digits(registers[18], 16);
+  Serial.print(":   ");
+  Serial.print(*(int8_t *)(registers + 17), 10);
+  Serial.print('.');
+  Serial.println(25 * (registers[18] >> 6), 10);
+  Serial.println("");
 }
 
 void update_display_with_registers() {
@@ -737,7 +652,7 @@ void update_display_with_registers() {
 
   uint8_t registers[19];
   get_registers(registers);
-  print_registers_fancy(registers, /* to_tft= */true);
+  print_registers_fancy(registers);
 }
 
 // -------------------------------------------------------------------
