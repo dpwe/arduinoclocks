@@ -342,7 +342,7 @@ protected:
   uint8_t read_register(uint8_t reg);
   void read_registers(uint8_t reg, uint8_t* buffer, uint8_t num);
   void write_register(uint8_t reg, uint8_t val);
-  void write_registers(uint8_t reg, uint8_t* buffer, uint8_t num);
+  void write_registers(uint8_t reg, const uint8_t* buffer, uint8_t num);
 };
 
 /**************************************************************************/
@@ -396,6 +396,9 @@ public:
   void setControlReg(uint8_t val);
   uint8_t getStatusReg();
   void setStatusReg(uint8_t val);
+  void getRegisters(uint8_t *buf, uint8_t num);  // Reads up to 19 bytes.
+  void setRegisters(const uint8_t *buf, uint8_t num);  // Sets up to 19 bytes
+
   /*!
       @brief  Convert the day of the week to a representation suitable for
               storing in the DS3231: from 1 (Monday) to 7 (Sunday).

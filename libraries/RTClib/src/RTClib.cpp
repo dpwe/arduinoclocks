@@ -104,7 +104,7 @@ void RTC_I2C::read_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
     @param num number of values to write
 */
 /**************************************************************************/
-void RTC_I2C::write_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
+void RTC_I2C::write_registers(uint8_t reg, const uint8_t* buffer, uint8_t num) {
   uint8_t my_buffer[20];
   assert(num <= 19);
   // We need to assemble a single buffer with reg followed by payload.

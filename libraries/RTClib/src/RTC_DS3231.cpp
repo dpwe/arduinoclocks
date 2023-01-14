@@ -174,6 +174,28 @@ void RTC_DS3231::setStatusReg(uint8_t val) {
 
 /**************************************************************************/
 /*!
+    @brief  Get the current value of all the registers.
+    @param  buf Pre-allocated buffer to write the registers into
+    @num    num Number of bytes to read (and size of buf).  Up to 19.
+*/
+/**************************************************************************/
+void RTC_DS3231::getRegisters(uint8_t *buf, uint8_t num) {
+  read_registers(/* start register */ 0, buf, num);
+}
+
+/**************************************************************************/
+/*!
+    @brief  Write new values to all the registers at once.
+    @param  buf Buffer containing all the new register values.
+    @num    num Number of bytes to write (and size of buf).  Up to 19.
+*/
+/**************************************************************************/
+void RTC_DS3231::setRegisters(const uint8_t *buf, uint8_t num){
+  write_registers(/* start register */ 0, buf, num);
+}
+
+/**************************************************************************/
+/*!
     @brief  Set alarm 1 for DS3231
         @param 	dt DateTime object
         @param 	alarm_mode Desired mode, see Ds3231Alarm1Mode enum
