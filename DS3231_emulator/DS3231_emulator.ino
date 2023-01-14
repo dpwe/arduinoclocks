@@ -39,7 +39,8 @@
   dpwe@google.com 2022-12-31
 */
 
-#define SQWV_PIN 3
+// Emit SQWV on LED pin.
+#define SQWV_PIN 13
 
 // Include Arduino Wire library for I2C
 #include <Wire.h>
