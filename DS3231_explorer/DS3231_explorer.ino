@@ -389,7 +389,8 @@ void RTC_set_time(const DateTime& dt) {
   //setTime(ds3231.now().unixtime());
 }
 
-// ------------------------
+// ---- Misc formatting -----
+
 void print2Digits(int digits, int base=10)
 {
   // Print a 2-digit value with a leading zero if needed.
@@ -403,77 +404,6 @@ void itoa2(int num, char *s, int base=10) {
   *s++ = DTOA(num / base);
   *s++ = DTOA(num % base);
   *s++ = '\0';
-}
-
-// ----- low-level I2C access ---------
-
-void wire_tx(byte i2c_address, byte address_offset, byte num_bytes, const byte *payload) {
-  Wire.beginTransmission(i2c_address);
-  Wire.write(address_offset);
-  for (int i = 0; i < num_bytes; ++i) {
-    Wire.write(payload[i]);
-  }
-  Wire.endTransmission();
-}
-
-void wire_rx(byte i2c_address, byte address_offset, byte num_bytes, byte *payload) {
-  Wire.beginTransmission(i2c_address);
-  Wire.write(address_offset);
-  Wire.endTransmission();
-  Wire.requestFrom(i2c_address, num_bytes); 
-  for (int i = 0; i < num_bytes; ++i) {
-    payload[i] = Wire.read();
-  }
-}
-
-void write_register(uint8_t reg, uint8_t val) {
-  Wire.beginTransmission(CLOCK_ADDRESS);
-  Wire.write(reg);
-  Wire.write(val);
-  Wire.endTransmission();
-}
-
-uint8_t read_register(uint8_t reg) {
-  Wire.beginTransmission(CLOCK_ADDRESS);
-  Wire.write(reg);
-  Wire.endTransmission();
-  Wire.requestFrom(CLOCK_ADDRESS, 1);
-  uint8_t val = Wire.read();
-  return val;
-}
-
-void get_registers(uint8_t *registers) {
-  // Read all 19 hex registers and print out.
-  // registers must point to 19 free bytes.
-  wire_rx(CLOCK_ADDRESS, 0, 19, registers);
-}
-
-void print_registers(uint8_t *registers) {
-  // Display all 19 hex registers.
-  Serial.print("Regs: ");
-  wire_rx(CLOCK_ADDRESS, 0, 19, registers);
-  for (int i = 0; i < 19; ++i) {
-    if (registers[i] < 16)  Serial.print("0");
-    Serial.print(registers[i], HEX);
-    Serial.print(" ");
-  }
-  Serial.println("");
-}
-
-// ----- Encode/decode DS3231 registers ---------
-
-#define BCDTODEC(x) ((x) - 6 * ((x) >> 4))
-
-DateTime ds3231_regs_to_datetime(uint8_t *regs) {
-  // Format the 7 byte DS3231 time registers to a DateTime obj.
-  uint8_t secs = BCDTODEC(regs[0]);
-  uint8_t mins = BCDTODEC(regs[1]);
-  uint8_t hours = BCDTODEC(regs[2]);
-  uint8_t dow = BCDTODEC(regs[3]);  // 1-7.
-  uint8_t day = BCDTODEC(regs[4]);  // 1-31
-  uint8_t month = BCDTODEC(regs[5] & 0x7F);  // 1-12
-  uint16_t year = 2000 + ((regs[5] & 0x80) ? 100 : 0) + BCDTODEC(regs[6]);
-  return DateTime(year, month, day, hours, mins, secs);
 }
 
 void sprint_bits(uint8_t val, char* names[8], char *s) {
@@ -496,6 +426,22 @@ void print_bits(uint8_t val, char* names[8]) {
   char s[70];
   sprint_bits(val, names, s);
   Serial.print(s);
+}
+
+// ----- Encode/decode DS3231 registers ---------
+
+#define BCDTODEC(x) ((x) - 6 * ((x) >> 4))
+
+DateTime ds3231_regs_to_datetime(uint8_t *regs) {
+  // Format the 7 byte DS3231 time registers to a DateTime obj.
+  uint8_t secs = BCDTODEC(regs[0]);
+  uint8_t mins = BCDTODEC(regs[1]);
+  uint8_t hours = BCDTODEC(regs[2]);
+  uint8_t dow = BCDTODEC(regs[3]);  // 1-7.
+  uint8_t day = BCDTODEC(regs[4]);  // 1-31
+  uint8_t month = BCDTODEC(regs[5] & 0x7F);  // 1-12
+  uint16_t year = 2000 + ((regs[5] & 0x80) ? 100 : 0) + BCDTODEC(regs[6]);
+  return DateTime(year, month, day, hours, mins, secs);
 }
 
 void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
@@ -580,11 +526,24 @@ void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
     }
 }
 
+void print_registers(uint8_t *registers) {
+  // Display all 19 hex registers.
+  Serial.print("Regs: ");
+  for (int i = 0; i < 19; ++i) {
+    if (registers[i] < 16)  Serial.print("0");
+    Serial.print(registers[i], HEX);
+    Serial.print(" ");
+  }
+  Serial.println("");
+}
+
 char *CONTROL_NAMES[8] = {"#EO", "BSQ", "CNV", "RS2", "RS1", "INT", "A2E", "A1E"};
 char *STATUS_NAMES[8]  = {"OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F"};
 
 void print_registers_fancy(uint8_t *registers) {
-  // registers is return from get_registers.
+  // Decode the entire state of the DS3231 to the terminal.
+  // registers[19] is return from ds3231.getRegisters().
+  
   // Print date/time.
   char s[70];  // Needed for longest sprint_bits.
   Serial.print("Time:");
@@ -643,16 +602,6 @@ void print_registers_fancy(uint8_t *registers) {
   Serial.print('.');
   Serial.println(25 * (registers[18] >> 6), 10);
   Serial.println("");
-}
-
-void update_display_with_registers() {
-  display.setTextSize(1);
-  display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,0);
-
-  uint8_t registers[19];
-  get_registers(registers);
-  print_registers_fancy(registers);
 }
 
 // -------------------------------------------------------------------
@@ -777,6 +726,10 @@ void cmd_prompt() {
   //Serial.flush();
 }
 
+// Macro to set or clear bits specified by bitmask in a register.
+#define SET_BIT_IN_REG_TO(reg, bitmask, val)  if (val) reg |= (bitmask); else reg &= ~(bitmask);
+
+
 const int16_t ds3231_freqs[4] = {1, 1024, 4096, 8192};
 
 void handle_cmd(char cmd, char * arg) {
@@ -787,7 +740,7 @@ void handle_cmd(char cmd, char * arg) {
   int value; // In case we need it.
   DateTime dt; // In case we need it.
   char s[64]; // In case we need it.
-  uint8_t regs[4];  // In case we need it.
+  uint8_t regs[19];  // In case we need it.
   int alen = strlen(arg);
   switch (cmd) {
     
@@ -803,24 +756,20 @@ void handle_cmd(char cmd, char * arg) {
     
    case 'B':
     // Enable/disable battery square wave output (bit 6 of CONTROL).
-    ctrl = read_register(DS3231_CONTROL);
+    ctrl = ds3231.getControlReg();
     if (alen) {
-      b = atob(arg);
-      if (b) ctrl |= 0x40;
-      else   ctrl &= (0xFF - 0x40);
-      write_register(DS3231_CONTROL, ctrl);
+      SET_BIT_IN_REG_TO(ctrl, 0x40, atob(arg));
+      ds3231.setControlReg(ctrl);
     }
     print_enabled_disabled("BBSQWV", ctrl & 0x40);
     break;
     
    case 'C':
     // Enable/disable 32 kHz output (bit 3 of STATUS).
-    status = read_register(DS3231_STATUSREG);
+    status = ds3231.getStatusReg();
     if (alen) {
-      b = atob(arg);
-      if (b) status |= 0x08;
-      else   status &= (0xFF - 0x08);
-      write_register(DS3231_STATUSREG, status);
+      SET_BIT_IN_REG_TO(status, 0x08, atob(arg));
+      ds3231.setStatusReg(status);
     }
     print_enabled_disabled("32 kHz output", status & 0x08);
     break;
@@ -828,34 +777,27 @@ void handle_cmd(char cmd, char * arg) {
    case 'D':
     // Display all registers
     uint8_t registers[19];
-    get_registers(registers);
+    ds3231.getRegisters(registers, 19);
     print_registers_fancy(registers);
-    //dt = ds3231_regs_to_datetime(registers);
-    //sprint_datetime(dt, s);  
-    //Serial.println(s);
     break;
     
    case 'E':
     // Enable/disable master oscillator (not bit 7 of CONTROL).
-    ctrl = read_register(DS3231_CONTROL);
+    ctrl = ds3231.getControlReg();
     if (alen) {
       // The flag is actuall NOT(enable osc), so flip the value.
-      b = !atob(arg);
-      if (b) ctrl |= 0x80;
-      else   ctrl &= (0xFF - 0x80);
-      write_register(DS3231_CONTROL, ctrl);
+      SET_BIT_IN_REG_TO(ctrl, 0x80, !atob(arg));
+      ds3231.setControlReg(ctrl);
     }
     print_enabled_disabled("Master osc", !(ctrl & 0x80));
     break;
     
    case 'I':
     // Enable alarm interrupt outputs on SQWV (bit 2 of CONTROL).
-    ctrl = read_register(DS3231_CONTROL);
+    ctrl = ds3231.getControlReg();
     if (alen) {
-      b = atob(arg);
-      if (b) ctrl |= 0x04;
-      else   ctrl &= (0xFF - 0x04);
-      write_register(DS3231_CONTROL, ctrl);
+      SET_BIT_IN_REG_TO(ctrl, 0x04, atob(arg));
+      ds3231.setControlReg(ctrl);
     }
     print_enabled_disabled("Alarm interrupt outputs", ctrl & 0x04);
     break;
@@ -864,11 +806,9 @@ void handle_cmd(char cmd, char * arg) {
     // Alarm 1
     if (alen == 1) {
       // Alarm1 enable/disable (bit 0 of CONTROL).
-      ctrl = read_register(DS3231_CONTROL);
-      b = atob(arg);
-      if (b) ctrl |= 0x01;
-      else   ctrl &= (0xFF - 0x01);
-      write_register(DS3231_CONTROL, ctrl);
+      ctrl = ds3231.getControlReg();
+      SET_BIT_IN_REG_TO(ctrl, 0x01, atob(arg));
+      ds3231.setControlReg(ctrl);
       print_enabled_disabled("A1IE", ctrl & 0x01);
     } else if (alen > 1) {
       uint8_t mode;
@@ -876,13 +816,14 @@ void handle_cmd(char cmd, char * arg) {
       sprint_datetime(dt, s);
       Serial.println(s);
       // setAlarm only works when INTCN (bit 2 of control) is set.
-      ctrl = read_register(DS3231_CONTROL);
-      if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl | 0x04);
+      ctrl = ds3231.getControlReg();
+      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl | 0x04);
       ds3231.setAlarm1(dt, (Ds3231Alarm1Mode)mode);      
       // Restore conv bit
-      if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl);
+      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl);
     }
-    wire_rx(CLOCK_ADDRESS, 7, 4, regs);
+    // Read in the 4 bytes defining alarm1.
+    ds3231.getRegisters(regs, 4, DS3231_ALARM1);
     sprint_alarm(regs, s);
     Serial.print("Alarm 1: ");
     Serial.println(s);
@@ -892,11 +833,9 @@ void handle_cmd(char cmd, char * arg) {
     // Alarm 2
     if (alen == 1) {
       // Alarm2 enable/disable (bit 1 of CONTROL).
-      ctrl = read_register(DS3231_CONTROL);
-      b = atob(arg);
-      if (b) ctrl |= 0x02;
-      else   ctrl &= (0xFF - 0x02);
-      write_register(DS3231_CONTROL, ctrl);
+      ctrl = ds3231.getControlReg();
+      SET_BIT_IN_REG_TO(ctrl, 0x02, atob(arg));
+      ds3231.setControlReg(ctrl);
       print_enabled_disabled("A2IE", ctrl & 0x02);
     } else if (alen > 1) {
       uint8_t mode;
@@ -904,14 +843,15 @@ void handle_cmd(char cmd, char * arg) {
       sprint_datetime(dt, s);
       Serial.println(s);
       // setAlarm only works when INTCN (bit 2 of control) is set.
-      ctrl = read_register(DS3231_CONTROL);
-      if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl | 0x04);
+      ctrl = ds3231.getControlReg();
+      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl | 0x04);
       ds3231.setAlarm2(dt, (Ds3231Alarm2Mode)mode);
       // Restore conv bit
-      if (!(ctrl & 0x04))  write_register(DS3231_CONTROL, ctrl);
+      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl);
     }
+    // Simulate 4-byte Alarm1 registers by making first byte = 0.
     regs[0] = 0;
-    wire_rx(CLOCK_ADDRESS, 11, 3, regs + 1);
+    ds3231.getRegisters(regs + 1, 3, DS3231_ALARM2);
     sprint_alarm(regs, s);
     Serial.print("Alarm 2: ");
     Serial.println(s);
@@ -928,12 +868,12 @@ void handle_cmd(char cmd, char * arg) {
     
    case 'Q':
     // SQWV frequency. RS2:RS1 are CONTROL bits 4 and 3
-    ctrl = read_register(DS3231_CONTROL);
+    ctrl = ds3231.getControlReg();
     uint8_t rs;
     if (alen) {
       rs = arg[0] - '0';  // RS2:RS1
       ctrl = (ctrl & 0xE7) | ((rs & 0x03) << 3);
-      write_register(DS3231_CONTROL, ctrl);
+      ds3231.setControlReg(ctrl);
     }
     rs = (ctrl & 0x18) >> 3;
     Serial.print("SQWV freq=");
@@ -942,9 +882,9 @@ void handle_cmd(char cmd, char * arg) {
     
    case 'R':
     // Reset OSF, A1F, A2F (bits 7, 1, 0 of STATUS).
-    status = read_register(DS3231_STATUSREG);
-    status &= (0xFF - 0x83);
-    write_register(DS3231_STATUSREG, status);
+    status = ds3231.getStatusReg();
+    status &= ~0x83;
+    ds3231.setStatusReg(status);
     Serial.println("OSF, A1F, A2F cleared.");
     break;
     
@@ -959,9 +899,9 @@ void handle_cmd(char cmd, char * arg) {
    case 'T':
     // Read or initiate temp read (bit 5 of CONTROL).
     if (alen && atob(arg)) {
-      ctrl = read_register(DS3231_CONTROL);
+      ctrl = ds3231.getControlReg();
       ctrl |= 0x20;
-      write_register(DS3231_CONTROL, ctrl);
+      ds3231.setControlReg(ctrl);
       Serial.println("Temp conversion initiated.");
     }
     Serial.print("Temp=");
@@ -1059,7 +999,7 @@ const int ext_scl_pin = 25;
 
   Serial.print("DS3231 ");
   uint8_t registers[19];
-  get_registers(registers);
+  ds3231.getRegisters(registers, 19);
   print_registers(registers);
   Serial.println();
   //print_registers_fancy(registers);
@@ -1087,7 +1027,6 @@ void loop()
     if (now_sec != last_sec) {
       last_sec = now_sec;
       //update_display(dt);
-      //update_display_with_registers();
       ds3231_display(ds3231);
       led_state = !led_state;
       digitalWrite(ledPin, led_state);      
