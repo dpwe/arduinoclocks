@@ -101,10 +101,12 @@ void RTC_I2C::write_register(uint8_t reg, uint8_t val) {
 void RTC_I2C::read_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
   // Put register index in first byte of buffer, overwritten on read.
   if (read_registers_fn_ptr) {
-	(*read_registers_fn_ptr)(reg, buffer, num);
+    (*read_registers_fn_ptr)(reg, buffer, num);
   } else {
-	buffer[0] = reg;
-    i2c_dev->write_then_read(buffer, 1, buffer, num);
+    //buffer[0] = reg;
+    //i2c_dev->write_then_read(buffer, 1, buffer, num);
+    i2c_dev->write(&reg, 1);
+    i2c_dev->read(buffer, num);
   }
 }
 
