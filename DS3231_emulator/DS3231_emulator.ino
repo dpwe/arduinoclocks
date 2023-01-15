@@ -126,10 +126,10 @@ static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
 static uint8_t dowToDS3231(uint8_t d) { return d == 0 ? 7 : d; }
 
 // Space for registers.
-#define NUM_REGISTERS 20  // 20th address holds target state of SQWV output
+#define NUM_REGISTERS 19
 // Double-buffers to allow immediate register updates.
-uint8_t registers0[NUM_REGISTERS];
-uint8_t registers1[NUM_REGISTERS];
+uint8_t registers0[NUM_REGISTERS + 1];    // 20th address holds target state of SQWV output
+uint8_t registers1[NUM_REGISTERS + 1];
 // Current register set.
 uint8_t *registers = registers0;
 uint8_t *registers_next = registers1;
@@ -156,7 +156,7 @@ void encode_time_to_regs(const DateTime& dt, uint8_t *buffer) {
 
 void ds3231_setup() {
   // Zero-out registers.
-  for (int i = 0; i < NUM_REGISTERS; ++i) {
+  for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
     registers[i] = 0;
   }
   // Initialize time to something legal.
@@ -165,7 +165,7 @@ void ds3231_setup() {
   registers[DS3231_TEMPERATUREREG] = 25;
   
   // Copy to 2nd registers.
-  for (int i = 0; i < NUM_REGISTERS; ++i) {
+  for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
     registers_next[i] = registers[i];
   }
 }
@@ -289,7 +289,7 @@ void ds3231_tick(uint8_t *registers, uint8_t advance=1) {
 void ds3231_setup_next_tick(int advance=1) {
   // Setup registers_next to be correct for the next tick event.
   // First, copy current registers to registers_next:
-  for (int i = 0; i < NUM_REGISTERS; ++i) {
+  for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
     registers_next[i] = registers[i];
   }
   // Then, advance it by 1 second.
@@ -361,7 +361,7 @@ void receiveEvent(int howmany) {
     ++cursor;
   }
   // Maybe act on the new register values.
-  ds3231_registers_updated(seconds_modified);  
+  ds3231_registers_updated(seconds_modified);
 }
 
 void requestEvent() {
@@ -369,9 +369,12 @@ void requestEvent() {
   // I *think* I2C indicates how many bytes it wants by sending a STOP after it's had enough.
   // but this doesn't appear to be visible through Wire.
   // So we send everything, and count on any excess being dropped.
-  uint8_t x = 0;
-  //Serial.print("Send regs from ");
-  //Serial.println(cursor);
+  
+  // It's critical that cursor has been set (via a preceding receiveEvent) before this runs.
+  // The stock DS3231_RTC used i2c_dev->write_then_read, which actually ended up not servicing
+  // the receive event until *after* the output buffer had been stuffed, so the cursor was always
+  // one transaction behind.  Modifying it to use write() followed by read() fixed it, finally!
+  
   Wire1.write(registers + cursor, NUM_REGISTERS - cursor);
 }
 
@@ -384,7 +387,7 @@ void requestEvent() {
 #define I2C_FREQ 100000
 
 void setup() {
-  // Configure SQWV output pin.
+  // Configure SQWV output pin (typically LED).
   pinMode(SQWV_PIN, OUTPUT);
   digitalWrite(SQWV_PIN, HIGH);  // Default state.
   
@@ -397,6 +400,7 @@ void setup() {
   
   // Setup Serial Monitor 
   Serial.begin(9600);
+  delay(500);  // For port to wake up.
   Serial.println("DS3231_emulator ");
   Serial.print(__DATE__);
   Serial.print(" ");
