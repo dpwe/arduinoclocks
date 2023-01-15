@@ -58,18 +58,6 @@
 
 /**************************************************************************/
 /*!
-    @brief Write value to register.
-    @param reg register address
-    @param val value to write
-*/
-/**************************************************************************/
-void RTC_I2C::write_register(uint8_t reg, uint8_t val) {
-  uint8_t buffer[2] = {reg, val};
-  i2c_dev->write(buffer, 2);
-}
-
-/**************************************************************************/
-/*!
     @brief Read value from register.
     @param reg register address
     @return value of register
@@ -77,9 +65,29 @@ void RTC_I2C::write_register(uint8_t reg, uint8_t val) {
 /**************************************************************************/
 uint8_t RTC_I2C::read_register(uint8_t reg) {
   uint8_t buffer[1];
-  i2c_dev->write(&reg, 1);
-  i2c_dev->read(buffer, 1);
+  if (read_registers_fn_ptr) {
+	(*read_registers_fn_ptr)(reg, buffer, 1);
+  } else {
+	i2c_dev->write(&reg, 1);
+    i2c_dev->read(buffer, 1);
+  }
   return buffer[0];
+}
+
+/**************************************************************************/
+/*!
+    @brief Write value to register.
+    @param reg register address
+    @param val value to write
+*/
+/**************************************************************************/
+void RTC_I2C::write_register(uint8_t reg, uint8_t val) {
+  uint8_t buffer[2] = {reg, val};
+  if (write_registers_fn_ptr) {
+	(*write_registers_fn_ptr)(reg, buffer + 1, 1);
+  } else {
+	i2c_dev->write(buffer, 2);
+  }
 }
 
 /**************************************************************************/
@@ -92,8 +100,12 @@ uint8_t RTC_I2C::read_register(uint8_t reg) {
 /**************************************************************************/
 void RTC_I2C::read_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
   // Put register index in first byte of buffer, overwritten on read.
-  buffer[0] = reg;
-  i2c_dev->write_then_read(buffer, 1, buffer, num);
+  if (read_registers_fn_ptr) {
+	(*read_registers_fn_ptr)(reg, buffer, num);
+  } else {
+	buffer[0] = reg;
+    i2c_dev->write_then_read(buffer, 1, buffer, num);
+  }
 }
 
 /**************************************************************************/
@@ -107,12 +119,16 @@ void RTC_I2C::read_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
 void RTC_I2C::write_registers(uint8_t reg, const uint8_t* buffer, uint8_t num) {
   uint8_t my_buffer[20];
   assert(num <= 19);
-  // We need to assemble a single buffer with reg followed by payload.
-  my_buffer[0] = reg;
-  for (int i = 0; i < num; ++i) {
-    my_buffer[1 + i] = buffer[i];
+  if (write_registers_fn_ptr) {
+	(*write_registers_fn_ptr)(reg, buffer, num);
+  } else {
+    // We need to assemble a single buffer with reg followed by payload.
+	my_buffer[0] = reg;
+    for (int i = 0; i < num; ++i) {
+      my_buffer[1 + i] = buffer[i];
+    }
+    i2c_dev->write(my_buffer, num + 1);
   }
-  i2c_dev->write(my_buffer, num + 1);
 }
   
 

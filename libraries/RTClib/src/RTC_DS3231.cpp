@@ -29,6 +29,23 @@ bool RTC_DS3231::begin(TwoWire *wireInstance) {
 
 /**************************************************************************/
 /*!
+    @brief  Initialize DS3231 with a different method for accessing registers
+    @param  read_regs_fn_ptr Pointer to function to retrieve DS3231 registers.
+    @param  write_regs_fn_ptr Pointer to function to set DS3231 registers.
+    @return True.
+*/
+/**************************************************************************/
+bool RTC_DS3231::begin(void (*read_regs_fn_ptr)(uint8_t reg, uint8_t* buffer, uint8_t num),
+                       void (*write_regs_fn_ptr)(uint8_t reg, const uint8_t* buffer, uint8_t num)) {
+  // Set the fields in the parent I2C class that actually redirect all the access.
+  read_registers_fn_ptr = read_regs_fn_ptr;
+  write_registers_fn_ptr = write_regs_fn_ptr;
+  return true;
+}
+
+
+/**************************************************************************/
+/*!
     @brief  Check the status register Oscillator Stop Flag to see if the DS3231
    stopped due to power loss
     @return True if the bit is set (oscillator stopped) or false if it is

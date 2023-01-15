@@ -321,6 +321,8 @@ protected:
 /**************************************************************************/
 /*!
     @brief  A generic I2C RTC base class. DO NOT USE DIRECTLY
+
+   dpwe modified to alternately use provided register access.
 */
 /**************************************************************************/
 class RTC_I2C {
@@ -339,6 +341,10 @@ protected:
   */
   static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
   Adafruit_I2CDevice *i2c_dev = NULL; ///< Pointer to I2C bus interface
+  // Alternate accessors.
+  void (*read_registers_fn_ptr)(uint8_t reg, uint8_t* buffer, uint8_t num) = NULL;
+  void (*write_registers_fn_ptr)(uint8_t reg, const uint8_t* buffer, uint8_t num) = NULL;
+
   uint8_t read_register(uint8_t reg);
   void read_registers(uint8_t reg, uint8_t* buffer, uint8_t num);
   void write_register(uint8_t reg, uint8_t val);
@@ -372,6 +378,9 @@ public:
 class RTC_DS3231 : RTC_I2C {
 public:
   bool begin(TwoWire *wireInstance = &Wire);
+  // Alternate initializer for non-I2C.
+  bool begin(void (*read_regs_fn_ptr)(uint8_t reg, uint8_t* buffer, uint8_t num),
+             void (*write_regs_fn_ptr)(uint8_t reg, const uint8_t* buffer, uint8_t num));
   void adjust(const DateTime &dt);
   bool lostPower(void);
   DateTime now();
