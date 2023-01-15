@@ -310,6 +310,7 @@ void ds3231_display(class RTC_DS3231& ds3231) {
   strcpy(s, "A:");
   itoa(ds3231.getAging(), s + 2, 10);
   display.print(s);
+  display.print("   ");
 
   // Temp
   display.setTextColor(MAGENTA, BLACK);
@@ -321,6 +322,7 @@ void ds3231_display(class RTC_DS3231& ds3231) {
   *s_end = '.';
   itoa(100*(t - int(t)), s_end + 1, 10);
   display.print(s);
+  display.print("   ");
 
 #ifdef DISPLAY_SH1107
   display.display();
