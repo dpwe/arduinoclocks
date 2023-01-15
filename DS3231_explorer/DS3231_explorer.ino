@@ -635,7 +635,7 @@ bool atob(char *s) {
 }
 
 uint32_t htoi(char *s) {
-  // Convert hex string to long int.
+  // Convert hex string to unsigned long int.
   uint32_t val = 0;
   while(*s) {
     uint8_t v = (*s) - '0';
@@ -820,8 +820,8 @@ void handle_cmd(char cmd, char * arg) {
       ctrl = ds3231.getControlReg();
       if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl | 0x04);
       ds3231.setAlarm1(dt, (Ds3231Alarm1Mode)mode);      
-      // Restore conv bit
-      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl);
+      // Restore conv bit (if we changed it), also A1E (set by setAlarm1).
+      ds3231.setControlReg(ctrl);
     }
     // Read in the 4 bytes defining alarm1.
     ds3231.getRegisters(regs, 4, DS3231_ALARM1);
@@ -847,8 +847,8 @@ void handle_cmd(char cmd, char * arg) {
       ctrl = ds3231.getControlReg();
       if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl | 0x04);
       ds3231.setAlarm2(dt, (Ds3231Alarm2Mode)mode);
-      // Restore conv bit
-      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl);
+      // Restore conv bit (if we changed it), also A2E (set by setAlarm2).
+      ds3231.setControlReg(ctrl);
     }
     // Simulate 4-byte Alarm1 registers by making first byte = 0.
     regs[0] = 0;
@@ -955,7 +955,7 @@ void cmd_update(void) {
   }
 }
 
-// -----------------------------------------
+// ----------------- setup() and loop() ------------------------
 
 const int ledPin = 13; // On-board LED
 
@@ -1012,12 +1012,9 @@ const int ext_scl_pin = 25;
 }
 
 unsigned long last_rtc_micros = 0;
-
-bool led_state = true;
-
 int last_sec = 0;
-void loop()
-{
+
+void loop() {
 
   cmd_update();
 
@@ -1029,10 +1026,8 @@ void loop()
       last_sec = now_sec;
       //update_display(dt);
       ds3231_display(ds3231);
-      led_state = !led_state;
-      digitalWrite(ledPin, led_state);      
     }
   }
-  
+  digitalWrite(ledPin, digitalRead(sqwvPin));  
   delay(polling_interval);
 }
