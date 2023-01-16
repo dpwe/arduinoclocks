@@ -5,8 +5,9 @@
 // Allow synchronization to each
 // Emit time sync messages over serial on demand.
 
-// This version runs on the Adafruit feather RP2040.
-// with a 128x64 OLED display and 3 input buttons.
+// This version runs on the Adafruit feather RP2040
+// with a 128x64 OLED display and 3 input buttons
+// or an ESP32-S2 TFT with built-in display,
 
 #include <Wire.h>
 
@@ -491,7 +492,9 @@ void update_GPS(void) {
     sync_time_from_GPS();
     // Request for sync e.g. from button press.
     if (request_sync_RTC) {
-      Serial.println("Setting DS3231 from GPS");
+      Serial.print("Setting ");
+      Serial.print(request_sync_RTC->pclock->name_);
+      Serial.println(" DS3231 from GPS");
       request_sync_RTC->rtc.adjust(DateTime(gps_clock.unixtime()));
       request_sync_RTC->pclock->clear_sync_history();  // Old sync records are irrelevant now.
       request_sync_RTC = NULL;
@@ -652,6 +655,7 @@ char *sprint_rtc_info(char *s, const class DS3231_holder &rtc) {
   s = sprint_int2(s, h);
   *s++ = ':';  
   s = sprint_int2(s, m);
+  *s++ = ' ';   // Trailing space to overwrite cruft.
   *s++ = 0;
   return entry_s;
 }
@@ -696,70 +700,6 @@ void serial_print_registers(void) {
   Serial.println("");
 }
 
-// -------------------------------------------------------------------
-// Input commands over serial line
-
-void cmd_setup(void) {
-  // Nothing to do?
-}
-
-#define CMD_BUF_LEN 32
-char cmd_buffer[CMD_BUF_LEN];
-int cmd_len = 0;
-
-void cmd_update(void) {
-  if (Serial.available() > 0) {
-    // read the incoming byte:
-    char new_char = Serial.read();
-    if (new_char == '\n') {
-      // handle command.
-      cmd_buffer[cmd_len] = '\0';
-      if (cmd_len > 0) {
-        byte cmd0 = cmd_buffer[0];
-        if (cmd0 >= 'a' && cmd0 <= 'z')  cmd0 -= ('a' - 'A');
-        switch (cmd0) {
-          case '?':
-            Serial.println("S    - Sync DS3231 to GPS");
-            Serial.println("R    - Print DS3231 registers");
-            Serial.println("C    - Initiate temperature conversion");
-            Serial.println("T    - Read DS3231 temperature");
-            Serial.println("Axx  - Set Aging Offset -128 to 127");
-            break;
-          case 'S':
-            // Sync DS3231 to GPS
-            request_sync_RTC = active_rtc;
-            break;
-          case 'R':
-            // Read DS3231 registers
-            serial_print_registers();
-            break;
-          case 'C':
-            // Initiate temperature conversion.
-            //ds3231_startConvertTemperature();
-            //Serial.println("Temp conversion initiated");
-            break;
-          case 'T':
-            // Read DS3231 temperature
-            Serial.print("DS3231 temperature=");
-            Serial.println(active_rtc->getTemperatureCentidegs() / 100.0);
-            break;
-          case 'A':
-            // Set DS3231 aging register.
-            int aging_offset = atoi(cmd_buffer + 1);
-            active_rtc->setAgingOffset(aging_offset);
-            Serial.print("Aging offset set to ");
-            Serial.println(aging_offset);
-            break;
-        }
-      }
-      cmd_len = 0;
-    } else {
-      if (cmd_len < CMD_BUF_LEN) {
-        cmd_buffer[cmd_len++] = new_char;
-      }
-    }
-  }
-}
 
 // ======================================================
 // =========== OLED Display ==============
@@ -915,6 +855,8 @@ void sleep_display(void) {
 #ifdef DISPLAY_SH1107
   display.clearDisplay();
   display.display();
+#else
+  display.fillScreen(BLACK);
 #endif
   display_on = false;
 }
@@ -1053,6 +995,76 @@ void buttons_update(time_t t) {
   }
 }
 
+// -------------------------------------------------------------------
+// Input commands over serial line
+// -------------------------------------------------------------------
+
+void cmd_setup(void) {
+  // Nothing to do?
+}
+
+#define CMD_BUF_LEN 32
+char cmd_buffer[CMD_BUF_LEN];
+int cmd_len = 0;
+
+void cmd_update(time_t t) {
+  if (Serial.available() > 0) {
+    secs_last_action = t;  // Reset sleep display timeout.
+    // read the incoming byte:
+    char new_char = Serial.read();
+    if (new_char == '\n') {
+      // handle command.
+      cmd_buffer[cmd_len] = '\0';
+      if (cmd_len > 0) {
+        byte cmd0 = cmd_buffer[0];
+        if (cmd0 >= 'a' && cmd0 <= 'z')  cmd0 -= ('a' - 'A');
+        switch (cmd0) {
+          case '?':
+            Serial.println("Y    - sYnc DS3231 to GPS");
+            Serial.println("R    - print DS3231 Registers");
+            Serial.println("S    - Swap DS3231 internal/external");
+            Serial.println("Axx  - Set Aging Offset -128 to 127");
+            Serial.println("D    - Dim screen");
+            break;
+          case 'Y':
+            // Sync DS3231 to GPS
+            request_sync_RTC = active_rtc;
+            break;
+          case 'R':
+            // Read DS3231 registers
+            serial_print_registers();
+            break;
+          case 'S':
+            // Swap RTC displayed.
+            swap_rtcs();
+            break;
+          case 'D':
+            // Dim screen
+            if (display_on) {
+              sleep_display();
+            } else {
+              wake_up_display();
+            }
+            break;
+          case 'A':
+            // Set DS3231 aging register.
+            int aging_offset = atoi(cmd_buffer + 1);
+            active_rtc->setAgingOffset(aging_offset);
+            Serial.print("Aging offset set to ");
+            Serial.println(aging_offset);
+            update_display(active_rtc);
+            break;
+        }
+      }
+      cmd_len = 0;
+    } else {
+      if (cmd_len < CMD_BUF_LEN) {
+        cmd_buffer[cmd_len++] = new_char;
+      }
+    }
+  }
+}
+
 // ======================================================
 // Main setup() and loop()
 // ======================================================
@@ -1124,7 +1136,7 @@ void loop() {
   digitalWrite(ledPin, digitalRead(active_rtc->sqwPin));
 
   buttons_update(sys_secs);
-  cmd_update();
+  cmd_update(sys_secs);
 
   int_rtc.update(sys_secs);
   ext_rtc.update(sys_secs);
