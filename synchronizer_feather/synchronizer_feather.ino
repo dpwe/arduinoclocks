@@ -5,7 +5,7 @@
 // Allow synchronization to each
 // Emit time sync messages over serial on demand.
 
-// This version runs on the Adafruit feather m4 express.
+// This version runs on the Adafruit feather RP2040.
 // with a 128x64 OLED display and 3 input buttons.
 
 #include <Wire.h>
@@ -17,8 +17,6 @@
 //   int DS3231 SQWV out (pale blue) -> A1 (GP27)
 //   GPS 1PPS out    (green)         -> A2 (GP28)
 //   ext DS3231 SQWV out             -> A3 (GP29)
-
-const int ppsPin = 28; // (A2) PPS output from GPS board
 const int ledPin = 13; // On-board LED
 
 // RP2040 Feather pins - default I2C
@@ -33,15 +31,22 @@ const int ledPin = 13; // On-board LED
 // 20/21 - 21 is not brought to pin on Feather RP2040
 // 24/25 - were originally my interrupt inputs, but YAY we have a winner.  Interrupts move to A2/A3
 //#ifdef DS3231_ON_EXTERNAL_I2C
-const int ext_sda_pin = 24;
+#ifdef ARDUINO_ARCH_RP2040
+const int ext_sda_pin = 24;   // Same physical pins on Feather, but different names.
 const int ext_scl_pin = 25;
 const int ext_sqwPin = 29; // (A3) SQWV output from external DS3231
+const int int_sqwPin = 27; // (A1) SQWV output from Feather (internal) DS3231
+const int ppsPin = 28; // (A2) PPS output from GPS board
+#else 
+const int ext_sda_pin = A4;
+const int ext_scl_pin = A5;
+const int ext_sqwPin = A3; // (A3) SQWV output from external DS3231
+const int int_sqwPin = A1; // (A1) SQWV output from Feather (internal) DS3231
+const int ppsPin = A2; // (A2) PPS output from GPS board
+#endif
 //#else
 // If using standard Feather I2C...
 //#define Wire Wire1
-const int int_sda_pin = 2;
-const int int_scl_pin = 3;
-const int int_sqwPin = 27; // (A1) SQWV output from Feather (internal) DS3231
 //#endif // DS3231_ON_EXTERNAL_I2C
 
 
@@ -158,6 +163,7 @@ class Clock {
     }
     if (sync_count_ > min_sync_count_) {
       if (oldest_sync_micros_ == 0) {
+        Serial.println("oldest_sync_micros_ 0");
         oldest_sync_micros_ = sync_micros;
         oldest_sync_unixtime_ = sync_unixtime;
         older_sync_micros_ = sync_micros;
@@ -196,6 +202,10 @@ class Clock {
     }
     long micros_drift = sync_micros - oldest_sync_micros_;
     measurement_period_secs_ = sync_unixtime - oldest_sync_unixtime_;
+    if (measurement_period_secs_ == 0) {
+      // still haven't yet collected enough data to measure.
+      return 0;
+    }
     // There will be wrap in the micros difference, but the residual after subtracting the seconds should be OK.
     micros_drift -= 1000000 * measurement_period_secs_;
     //Serial.print(name_);
@@ -400,7 +410,7 @@ Timezone myTZ(myDST, mySTD);
 
 #include <TinyGPS.h>       // http://arduiniana.org/libraries/TinyGPS/
 
-// Hardware serial on feather m4 is not used for USB monitor, RX is 0, TX is 1
+// GPS talks via secondary UART interface.  Default on RP2040, needs init on ESP32
 #define SerialGPS Serial1 
 
 TinyGPS gps;
@@ -456,7 +466,11 @@ void sync_time_from_GPS(void) {
 }
 
 void setup_GPS_serial(void) {
+#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
   SerialGPS.begin(9600);
+#else
+  SerialGPS.begin(9600, SERIAL_8N1, /* rxPin= */2, /* txPin= */1);
+#endif
 }
 
 void update_GPS_serial(void) {
@@ -601,6 +615,9 @@ char *sprint_clock_comparison(char *s, class Clock& clock, class Clock& ref_cloc
   //strcpy(s, "ppm ");
   //s += strlen(s);
   if (clock.ppm_tracking_) {
+    Serial.print(clock.name_);
+    Serial.print(" ppm_tracking: ");
+    Serial.println(clock.nanoseconds_error_per_sec_);
     // A positive ppm means ref clock has more nanosecs per tick than comparison clock
     // i.e. comparison clock is running fast (and so aging register loading should be
     // increased).
@@ -750,11 +767,144 @@ void cmd_update(void) {
 
 #include <SPI.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SH110X.h>
+
+#include <Adafruit_GFX.h>
+
+#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
+  #define DISPLAY_SH1107  // 128x64 mono OLED in Feather stack
+  // Wire1 is the internal I2C on Feather RP2040
+  #define WIRE_INTERNAL Wire1
+  #define WIRE_EXTERNAL Wire
+#else
+  #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+  #define WIRE_INTERNAL Wire
+  #define WIRE_EXTERNAL Wire1
+#endif
+
+#ifdef DISPLAY_SSD1351
+  // Arduino - Expect SQWV input on D3
+  const uint8_t sqwvPin = 3;
+
+  #include <Adafruit_SSD1351.h>
+  // Screen dimensions
+  #define SCREEN_WIDTH  128
+  #define SCREEN_HEIGHT 128 // Change this to 96 for 1.27" OLED.
+  #define SIZE_1X
+
+  // Hardware SPI pins 
+  // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be 
+  // an output. 
+  #define DC_PIN   4
+  #define CS_PIN   5
+  #define RST_PIN  6
+  Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
+
+  // Color definitions
+  #define BLACK           0x0000
+  #define BLUE            0x001F
+  #define RED             0xF800
+  #define GREEN           0x07E0
+  #define CYAN            0x07FF
+  #define MAGENTA         0xF81F
+  #define YELLOW          0xFFE0  
+  #define WHITE           0xFFFF
+#endif
+
+#ifdef DISPLAY_ST7789
+  // ESP32-S2/3 TFT
+  
+  #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+
+  #define SCREEN_WIDTH  240
+  #define SCREEN_HEIGHT 135 // Change this to 96 for 1.27" OLED.
+  #define SIZE_2X  // All text double-size
+
+  // Use dedicated hardware SPI pins
+  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+
+  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
+
+  #define WHITE ST77XX_WHITE
+  #define BLACK ST77XX_BLACK
+  #define BLUE  ST77XX_BLUE
+  #define RED   ST77XX_RED
+  #define GREEN ST77XX_GREEN
+  #define CYAN  ST77XX_CYAN
+  #define MAGENTA ST77XX_MAGENTA
+  #define YELLOW  ST77XX_YELLOW 
+#endif
+
+#ifdef DISPLAY_SH1107
+  // Feather (RP2040) stack
+
+  #include <Adafruit_SH110X.h>
+  
+  #define SCREEN_WIDTH  128
+  #define SCREEN_HEIGHT 64
+  #define SIZE_1X
+
+  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &WIRE_INTERNAL);
+
+  // Monochrome, all colors are white
+  #define WHITE SH110X_WHITE
+  #define BLACK SH110X_BLACK
+  #define BLUE  WHITE
+  #define RED   WHITE
+  #define GREEN WHITE
+  #define CYAN  WHITE
+  #define MAGENTA WHITE
+  #define YELLOW  WHITE 
+
+#endif
 
 bool display_on = false;
 
-Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire1);
+void setup_display(void) {
+#ifdef DISPLAY_SSD1351
+  display.begin();
+#endif
+#ifdef DISPLAY_ST7789
+  // turn on backlite
+  pinMode(TFT_BACKLITE, OUTPUT);
+  analogWrite(TFT_BACKLITE, 128);
+
+  display.init(135, 240); // Init ST7789 240x135
+  display.setRotation(3);
+#endif
+#ifdef DISPLAY_SH1107
+  display.begin(0x3C, true); // Address 0x3C default
+  display.display();  // Splashscreen
+  delay(500);
+  display.clearDisplay();
+  display.display();
+  display.setRotation(1);
+#endif
+
+  display.fillScreen(BLACK);
+
+  // text display 
+  display.setTextSize(1);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(0,0);
+  display.print("synchronizer_feather");
+
+  display_on = true;
+}
+
+#ifdef SIZE_1X
+  // 1x size
+  #define SMALL_SIZE 1
+  #define LARGE_SIZE 2
+  #define ROW_H 8
+  #define CHAR_W 6
+#else
+  // 2x size
+  #define SMALL_SIZE 2
+  #define LARGE_SIZE 4
+  #define ROW_H 16
+  #define CHAR_W 12
+#endif
 
 void wake_up_display(void) {
   display_on = true;
@@ -762,34 +912,11 @@ void wake_up_display(void) {
 }
 
 void sleep_display(void) {
+#ifdef DISPLAY_SH1107
   display.clearDisplay();
   display.display();
+#endif
   display_on = false;
-}
-
-void setup_display(void) {
-  
-  display.begin(0x3C, true); // Address 0x3C default
-
-  // Show image buffer on the display hardware.
-  // Since the buffer is intialized with an Adafruit splashscreen
-  // internally, this will display the splashscreen.
-  display.display();
-  delay(1000);
-
-  // Clear the buffer.
-  display.clearDisplay();
-  display.display();
-
-  display.setRotation(1);
-
-  // text display tests
-  display.setTextSize(2);
-  display.setTextColor(SH110X_WHITE);
-  display.setCursor(0,0);
-  display.print("DS3231 Feather");
-  display.display(); // actually display all of the above
-  display_on = true;
 }
 
 void update_display(class DS3231_holder *prtc) {
@@ -798,24 +925,28 @@ void update_display(class DS3231_holder *prtc) {
   }
   char s[64];  // We can only use up to 21, but sprint_clock_comparison could get large for very large skews.
   // Line 1: Current time, sync source.
-  display.fillRect(0, 0, 128, 64, SH110X_BLACK);
+#ifdef DISPLAY_SH1107
+  display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, BLACK);
+#endif
   display.setCursor(0, 0);
-  display.setTextSize(2);
+  display.setTextSize(LARGE_SIZE);
   display.print(sprint_unixtime(s, (*sys_clock).unixtime(), false));
-  display.setCursor(110, 0);
-  display.setTextSize(1);
+  display.setCursor(17 * CHAR_W, 0);
+  display.setTextSize(SMALL_SIZE);
   display.print(sys_clock->name_);
   // Line 2: RTC vs GPS.
-  display.setCursor(0, 32);
+  display.setCursor(0, 4 * ROW_H);
   display.print(prtc->pclock->name_);
   display.print(":");
-  display.setCursor(0, 41);
+  display.setCursor(0, 5 * ROW_H);
   display.print(sprint_clock_comparison(s, *(prtc->pclock), *sys_clock));
   // Line 3: RTC status
-  display.setCursor(0, 50);
+  display.setCursor(0, 6 * ROW_H);
   display.print(sprint_rtc_info(s, *prtc));
 
-  display.display(); // actually display all of the above
+#ifdef DISPLAY_SH1107
+  display.display();
+#endif
 }
 
 // ======================================================
@@ -823,7 +954,11 @@ void update_display(class DS3231_holder *prtc) {
 // ======================================================
 
 #define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
+#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
 int button_pins[NUM_BUTTONS] = {9, 8, 7};
+#else
+int button_pins[NUM_BUTTONS] = {9, 6, 5};
+#endif
 int button_state[NUM_BUTTONS] = {0, 0, 0};
 unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
 // For distinguishing short/long press
@@ -927,28 +1062,49 @@ void setup() {
   digitalWrite(ledPin, HIGH);
   // initialize serial communication at 9600 bits per second.
   Serial.begin(9600);
-  Serial.println("** synchronizer_feather_2DS **");
+  // Wait for Serial port to open
+  while (!Serial) {
+    delay(10);
+  }
+  Serial.print("synchronizer_feather ");
+  Serial.print(__DATE__);
+  Serial.print(" ");
+  Serial.println(__TIME__);
   Serial.println("Post-reset settling...");
-  delay(2000);
+  delay(1000);
   digitalWrite(ledPin, LOW);
 
-
+#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
   // Configure Pico RP2040 I2C
-  Wire.setSDA(ext_sda_pin);
-  Wire.setSCL(ext_scl_pin);
-  Wire.begin();
+  WIRE_EXTERNAL.setSDA(ext_sda_pin);
+  WIRE_EXTERNAL.setSCL(ext_scl_pin);
+  WIRE_EXTERNAL.begin();
+#else
+  Serial.println("Beginning Wire...");
+  WIRE_EXTERNAL.begin(ext_sda_pin, ext_scl_pin);
+  WIRE_INTERNAL.begin();
+#endif
   // I2C interface is started by display driver?
   //Wire1.begin();
-  
+
+  Serial.println("Display setup...");
   setup_display();  // includes i2c init.
-  int_rtc.setup(&Wire1);
-  ext_rtc.setup(&Wire);
+  Serial.println("int_rtc setup...");
+  int_rtc.setup(&WIRE_INTERNAL);
+  Serial.println("ext_rtc setup...");
+  ext_rtc.setup(&WIRE_EXTERNAL);
+  Serial.println("gps_serial setup...");
   setup_GPS_serial();
+  Serial.println("gps setup...");
   setup_GPS();
+  Serial.println("buttons setup...");
   buttons_setup(sys_clock->unixtime());
+  Serial.println("cmd setup...");
   cmd_setup();
 
+  Serial.println("interrupts setup...");
   setup_interrupts();
+  Serial.println("Setup done.");
 };
 
 // How long can we miss syncs before we give up on GPS clock?
