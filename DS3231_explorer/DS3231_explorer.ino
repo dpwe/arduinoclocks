@@ -43,18 +43,34 @@
 
 #include <RTClib.h>         // Adafruit; defines RTC_DS3231
 
+#ifdef ARDUINO_ARCH_RP2040
+  #define DISPLAY_SH1107
+  // Feather (RP2040) stack - expect SQWV on A2? (external DS3231)
+  const uint8_t sqwvPin = 29;  // (A3)
+  const int ext_sda_pin = 24;
+  const int ext_scl_pin = 25;
+#else
+  // Assume ESP32 TFT
+  #define DISPLAY_ST7789
+  // ESP32-S3 TFT - Expect SQWV input on 2 (external).
+  const uint8_t sqwvPin = A3;
+  const int ext_sda_pin = A4;
+  const int ext_scl_pin = A5;
+
+  // Arduino - Expect SQWV input on D3
+  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+  //const uint8_t sqwvPin = 3;
+#endif
+
 // ------------- Display ---------------
 
 #include <Adafruit_GFX.h>
 
 //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
-#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+//#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
 //#define DISPLAY_SH1107  // 128x64 mono OLED in Feather stack
 
 #ifdef DISPLAY_SSD1351
-  // Arduino - Expect SQWV input on D3
-  const uint8_t sqwvPin = 3;
-
   #include <Adafruit_SSD1351.h>
   // Screen dimensions
   #define SCREEN_WIDTH  128
@@ -81,9 +97,6 @@
 #endif
 
 #ifdef DISPLAY_ST7789
-  // ESP32-S3 TFT - Expect SQWV input on A0
-  const uint8_t sqwvPin = A0;
-
   #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
 
   #define SCREEN_WIDTH  240
@@ -107,9 +120,6 @@
 #endif
 
 #ifdef DISPLAY_SH1107
-  // Feather (RP2040) stack - expect SQWV on A2? (external DS3231)
-  const uint8_t sqwvPin = A2;
-
   #include <Adafruit_SH110X.h>
   
   #define SCREEN_WIDTH  128
@@ -959,6 +969,25 @@ void cmd_update(void) {
 
 // ----------------- setup() and loop() ------------------------
 
+bool serial_available = false;
+
+#define MAXWAIT_SERIAL 200  // 200 = 2 seconds.
+
+void open_serial(int baudrate=9600) {
+  Serial.begin(baudrate);
+  // Wait for Serial port to open
+  int i = 0;
+  while (!Serial) {
+    delay(10);
+    ++i;
+    if (i > MAXWAIT_SERIAL) break;
+  }
+  if (i <= MAXWAIT_SERIAL) {
+    serial_available = true;
+  }
+  //delay(500);
+}
+
 const int ledPin = 13; // On-board LED
 
 void setup()
@@ -969,15 +998,8 @@ void setup()
   // Configure the PPS input pin
   pinMode(sqwvPin, INPUT_PULLUP); // Set alarm pin as pullup
 
-  // Start the I2C interface
-
-  Serial.begin(9600);
-  // Wait for Serial port to open
-  while (!Serial) {
-    delay(10);
-  }
-  //delay(500);
-
+  open_serial();
+  
   Serial.print(F("DS3231_explorer "));
   Serial.print(__DATE__);
   Serial.print(" ");
@@ -985,19 +1007,24 @@ void setup()
 
 #ifdef ARDUINO_ARCH_RP2040
   // Configure Pico RP2040 I2C
-const int ext_sda_pin = 24;
-const int ext_scl_pin = 25;
   Wire.setSDA(ext_sda_pin);
   Wire.setSCL(ext_scl_pin);
   Wire.begin();
   // Wire is initialized inside OLED display
   //Wire1.begin();
+  #define DS3231_WIRE Wire
+#else
+  const int ext_sda_pin = A4;
+  const int ext_scl_pin = A5;
+  Wire1.begin(ext_sda_pin, ext_scl_pin);
+  Wire.begin();
+  #define DS3231_WIRE Wire1
 #endif
 
-  if (!ds3231.begin(&Wire)) {
+  while (!ds3231.begin(&DS3231_WIRE)) {
     Serial.println("Couldn't find RTC");
     Serial.flush();
-    abort();
+    delay(1000);
   }
 
   Serial.print("DS3231 ");
