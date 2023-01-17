@@ -1102,7 +1102,7 @@ void setup() {
   delay(1000);
   digitalWrite(ledPin, LOW);
 
-#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
+#ifdef ARDUINO_ARCH_RP2040
   // Configure Pico RP2040 I2C
   WIRE_EXTERNAL.setSDA(ext_sda_pin);
   WIRE_EXTERNAL.setSCL(ext_scl_pin);
