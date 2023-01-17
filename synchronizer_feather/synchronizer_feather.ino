@@ -1069,15 +1069,31 @@ void cmd_update(time_t t) {
 // Main setup() and loop()
 // ======================================================
 
+bool serial_available = false;
+
+#define MAXWAIT_SERIAL 200  // 200 = 2 seconds.
+
+void open_serial(int baudrate=9600) {
+  Serial.begin(baudrate);
+  // Wait for Serial port to open
+  int i = 0;
+  while (!Serial) {
+    delay(10);
+    ++i;
+    if (i > MAXWAIT_SERIAL) break;
+  }
+  if (i <= MAXWAIT_SERIAL) {
+    serial_available = true;
+  }
+  //delay(500);
+}
+
 void setup() {
   pinMode(ledPin, OUTPUT);
   digitalWrite(ledPin, HIGH);
-  // initialize serial communication at 9600 bits per second.
-  Serial.begin(9600);
-  // Wait for Serial port to open
-  while (!Serial) {
-    delay(10);
-  }
+
+  open_serial();
+  
   Serial.print("synchronizer_feather ");
   Serial.print(__DATE__);
   Serial.print(" ");
