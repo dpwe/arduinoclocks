@@ -39,6 +39,41 @@
 // Z - Read date/time
 // ZYYYYMMDDhhmmss - Set date/time
 
+// Emulator design:
+//   Arduino as I2C Secondary emulates behavior of DS3231 RTC
+//  including alarms and 1Hz SQWV output on SQWV_PIN
+//  but no 32 kHz output nor other SQWV frequencies
+//  and aging offset has no influence on time.
+//
+//  Connections:
+//
+//     A4  I2C Data
+//     A5  I2C Clock
+//     D13 SQWV/_INT output
+//
+//  DESIGN
+//
+//  For greatest accuracy, the RTC state needs to update as soon as possible
+//  after a "tick" event, either from internal or external hardware timers.
+//  To avoid processing delay, we precompute the state *at the next second*
+//  and set up a "double buffered" set of registered.  Then, when the "tick"
+//  interrupt occurs, we switch the register pointer to the precomputed set,
+//  and update the output pin (as appropriate).  Then, back in the foreground
+//  loop, we notice that the time has changed, and set up for the next tick.
+//
+//  Any configuration change (writing to registers) triggers a recompute of
+//  the next-tick state.
+//
+//  The synchronization to the hardware timer is reset when the seconds
+//  register is written (only).
+//
+//  Note, registers can be written "at any time" by i2c transactions.  In
+//  theory this can affect derived state, for instance alarm trigger state.
+//  We have to avoid race conditions where registers are modified, but then
+//  a tick causes a double-buffer swap before the new register values are
+//  propagated to the setup for the next tick.
+//
+//  dpwe@google.com 2022-12-31
 
 #include <SPI.h>
 #include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
