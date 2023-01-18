@@ -155,10 +155,11 @@ void setup_display(void) {
 #ifdef DISPLAY_SH1107
   display.begin(0x3C, true); // Address 0x3C default
   display.display();  // Splashscreen
-  delay(500);
+  delay(1000);
   display.clearDisplay();
   display.display();
   display.setRotation(1);
+  Serial.println("SH1107 started");
 #endif
 
   display.fillScreen(BLACK);
@@ -168,6 +169,10 @@ void setup_display(void) {
   display.setTextColor(WHITE);
   display.setCursor(0,0);
   display.print("DS3231_explorer");
+#ifdef DISPLAY_SH1107
+  display.display();
+#endif
+
 }
 
 char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
@@ -971,7 +976,7 @@ void cmd_update(void) {
 
 bool serial_available = false;
 
-#define MAXWAIT_SERIAL 200  // 200 = 2 seconds.
+#define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
 
 void open_serial(int baudrate=9600) {
   Serial.begin(baudrate);
@@ -985,7 +990,7 @@ void open_serial(int baudrate=9600) {
   if (i <= MAXWAIT_SERIAL) {
     serial_available = true;
   }
-  //delay(500);
+  delay(1000);
 }
 
 const int ledPin = 13; // On-board LED
