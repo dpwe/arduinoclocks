@@ -163,7 +163,7 @@
   #define SCREEN_HEIGHT 64
   #define SIZE_1X
 
-  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &Wire1);  // Wire1 is the internal I2C on Feather RP2040
+  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
 
   // Monochrome, all colors are white
   #define WHITE SH110X_WHITE
@@ -995,7 +995,7 @@ void cmd_update(void) {
 #define SQWV_PIN 13
 
 // Include Arduino Wire library for I2C
-#include <Wire.h>
+//#include <Wire.h>
 
 // Define minion I2C Address (matches DS3231 RTC)
 #define DS3231_ADDRESS 0x68   ///< I2C address for DS3231
