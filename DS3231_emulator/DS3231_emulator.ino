@@ -39,11 +39,26 @@
   dpwe@google.com 2022-12-31
 */
 
-// Emit SQWV on LED pin.
-#define SQWV_PIN 13
-
 // Include Arduino Wire library for I2C
 #include <Wire.h>
+
+#ifdef ARDUINO_ARCH_RP2040
+  // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
+  // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
+  const int ext_sda_pin = 24;
+  const int ext_scl_pin = 25;
+  #define EXT_I2C Wire
+  #define INT_I2C Wire1
+#else
+  // ESP32-S3
+  const int ext_sda_pin = A4;
+  const int ext_scl_pin = A5;
+  #define EXT_I2C Wire1
+  #define INT_I2C Wire
+#endif
+
+// Emit SQWV on LED pin.
+#define SQWV_PIN 13
 
 // Define minion I2C Address (matches DS3231 RTC)
 #define DS3231_ADDRESS 0x68   ///< I2C address for DS3231
@@ -67,20 +82,62 @@
 
 // ------ Counter timer ------
 
-// Use the hardware timer in the ESP32 to provide accurate PPS ticks.
+// Use a hardware timer provide accurate PPS ticks.
+// Architecture dependent.  Code must provide timer_setup(),
+// then arrange to call clock_tick() once per second.
+//
+// Changes to nanosecs_per_sec_trim should adjust rate (more positive = slower).
+//
+// timer_reset_sync() should reset the phase of the ticks (so the following tick is
+// exactly 1 sec later).
 
-uint32_t counter_ticks_between_firings = 1000000;  // Counter is microseconds.
+// Forward-declare the function that advances the clock.
+void clock_tick(void);
 
-uint32_t timer_next_firing = 0;
+int32_t tick_period_us = 1000000L;  // Counter is microseconds.
+
+int32_t timer_next_firing = 0;
 
 // Nanosecs per sec is ppb trim.
 int32_t nanosecs_per_sec_trim = 0;
 volatile int32_t cumulated_nanos = 0;
 
-hw_timer_t * timer = NULL;
+void timer_update_trim_ppb(int ppb) {
+  nanosecs_per_sec_trim = ppb;
+}
 
-// Forward-declare the function that advances the clock.
-void clock_tick(void);
+#ifdef ARDUINO_ARCH_RP2040
+
+static bool _repeating_timer_callback(struct repeating_timer *t) {
+  clock_tick();
+  cumulated_nanos += nanosecs_per_sec_trim;
+  int micros_offset = cumulated_nanos / 1000;
+  cumulated_nanos -= micros_offset * 1000;
+  //timerAlarmWrite(timer, tick_period_us + micros_offset, true);
+  return true;
+}
+
+// Should probably use a succession of add_alarm_at to get variable timing.
+struct repeating_timer mTimer;
+
+void timer_setup(void) {
+  // Setup regular timer interrupt.
+  // Negative period specifies (negative of) delay between successive calls,
+  // not between end of handler and next call.
+  add_repeating_timer_us(-tick_period_us, _repeating_timer_callback, NULL, &mTimer);
+}
+
+void timer_reset_sync(void) {
+  // Delete then restart the timer.
+  cancel_repeating_timer(&mTimer);
+  timer_setup();
+}
+
+#endif  // RP2040
+
+#ifdef ESP32
+
+hw_timer_t * timer = NULL;
 
 void ARDUINO_ISR_ATTR onTimer(){
   clock_tick();
@@ -88,11 +145,7 @@ void ARDUINO_ISR_ATTR onTimer(){
   cumulated_nanos += nanosecs_per_sec_trim;
   int micros_offset = cumulated_nanos / 1000;
   cumulated_nanos -= micros_offset * 1000;
-  timerAlarmWrite(timer, counter_ticks_between_firings + micros_offset, true);
-}
-
-void timer_update_trim_ppb(int ppb) {
-  nanosecs_per_sec_trim = ppb;
+  timerAlarmWrite(timer, tick_period_us + micros_offset, true);
 }
 
 void timer_setup(void) {
@@ -106,7 +159,7 @@ void timer_setup(void) {
 
   // Set alarm to call onTimer function every second (value in microseconds).
   // Repeat the alarm (third parameter)
-  timerAlarmWrite(timer, counter_ticks_between_firings, true);
+  timerAlarmWrite(timer, tick_period_us, true);
 
   // Start an alarm
   timerAlarmEnable(timer);
@@ -115,9 +168,9 @@ void timer_setup(void) {
 void timer_reset_sync(void) {
   // Happens e.g. when seconds register is written.  Make seconds happen relative to now.
   timerWrite(timer, 0);
-  // Update output state.
-  clock_tick();
 }
+
+#endif // ESP32
 
 // ----- DS3231 emulation -----
 #include "RTClib.h"  // For DateTime etc.
@@ -245,6 +298,10 @@ bool check_alarm_match(DateTime &now, DateTime &alarm, uint8_t alarm_mode) {
   }
 }
 
+#ifdef ARDUINO_ARCH_RP2040
+#define _BV(bit) (1 << bit)
+#endif
+
 #define CHECK_BIT(reg, bit) (reg & _BV(bit))
 
 void ds3231_tick(uint8_t *registers, uint8_t advance=1) {
@@ -304,7 +361,9 @@ void ds3231_registers_updated(bool seconds_modified) {
   ds3231_setup_next_tick(/* advance= */ seconds_modified ? 0 : 1);
   // Need to reset sync if we wrote seconds.
   if (seconds_modified) {
-    timer_reset_sync();  // Will deploy the registers_next setup by setup_next_tick.
+    timer_reset_sync();
+    // Update output state from setup_next_tick.
+    clock_tick();
   }
 }
 
@@ -339,18 +398,18 @@ void clock_tick(void) {
 }
 
 
-// --------- I2C Delegate handlers (on Wire1) --------------
+// --------- I2C Delegate handlers (on EXT_I2C) --------------
 
 uint8_t cursor = 0;  // Address of next register access.
 
 void receiveEvent(int howmany) {
   // Assume we got at least one data byte, and it's the cursor.
   bool seconds_modified = false;
-  cursor = Wire1.read();
+  cursor = EXT_I2C.read();
 
   // Any subsequent bytes are writes to that register.
-  while (Wire1.available()) {
-    uint8_t x = Wire1.read();
+  while (EXT_I2C.available()) {
+    uint8_t x = EXT_I2C.read();
     if (cursor < NUM_REGISTERS) {
       registers[cursor] = x;
       if (cursor == 0) {
@@ -371,32 +430,23 @@ void requestEvent() {
   // So we send everything, and count on any excess being dropped.
   
   // It's critical that cursor has been set (via a preceding receiveEvent) before this runs.
-  // The stock DS3231_RTC used i2c_dev->write_then_read, which actually ended up not servicing
-  // the receive event until *after* the output buffer had been stuffed, so the cursor was always
-  // one transaction behind.  Modifying it to use write() followed by read() fixed it, finally!
+  // The stock DS3231_RTC used i2c_dev->write_then_read, which (on the ESP32_ actually ended
+  // up not servicing the receive event until *after* the output buffer had been stuffed, so
+  // the cursor was always one transaction behind (works OK on RP2040 Pico).
+  // Modifying it to use write() followed by read() fixed it on ESP32.
   
-  Wire1.write(registers + cursor, NUM_REGISTERS - cursor);
+  EXT_I2C.write(registers + cursor, NUM_REGISTERS - cursor);
 }
 
 
 // --------------- setup(), loop() ---------------------
 
-// Delegate I2C bus config.  This acts like the DS3231 chip.
-#define SDA_PIN A4
-#define SCL_PIN A5
-#define I2C_FREQ 100000
+// Secondary I2C bus config.  This acts like the DS3231 chip.
 
 void setup() {
   // Configure SQWV output pin (typically LED).
   pinMode(SQWV_PIN, OUTPUT);
   digitalWrite(SQWV_PIN, HIGH);  // Default state.
-  
-  // Initialize I2C communications as minion
-  Wire1.begin(DS3231_ADDRESS, SDA_PIN, SCL_PIN, I2C_FREQ);
-  // Function to run when data requested from master
-  Wire1.onRequest(requestEvent); 
-  // Function to run when data received from master
-  Wire1.onReceive(receiveEvent);
   
   // Setup Serial Monitor 
   Serial.begin(9600);
@@ -405,6 +455,23 @@ void setup() {
   Serial.print(__DATE__);
   Serial.print(" ");
   Serial.println(__TIME__);
+
+  digitalWrite(SQWV_PIN, LOW);
+
+  // Initialize I2C communications as minion
+#ifdef ARDUINO_ARCH_RP2040
+  // Configure Pico RP2040 I2C
+  EXT_I2C.setSDA(ext_sda_pin);
+  EXT_I2C.setSCL(ext_scl_pin);
+  EXT_I2C.begin(DS3231_ADDRESS);
+#else  // ESP32/ATmeta
+  #define I2C_FREQ 100000
+  EXT_I2C.begin(DS3231_ADDRESS, ext_sda_pin, ext_scl_pin, I2C_FREQ);
+#endif
+  // Function to run when data requested from master
+  EXT_I2C.onRequest(requestEvent);
+  // Function to run when data received from master
+  EXT_I2C.onReceive(receiveEvent);
 
   ds3231_setup();
   timer_setup();
@@ -424,6 +491,7 @@ void loop() {
     // Report seconds.
     Serial.println(registers[0], HEX);
   }
+
   // Time delay in loop
   delay(10);
 }
