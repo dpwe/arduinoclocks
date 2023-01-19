@@ -204,7 +204,7 @@ void setup_display(void) {
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0,0);
-  display.print("DS3231_explorer");
+  display.print("DS3231_emu_exp");
 }
 
 char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
@@ -639,6 +639,145 @@ void print_registers_fancy(uint8_t *registers) {
   Serial.println("");
 }
 
+// ------------- Display sleep (screensaver) -----------
+
+bool display_on = true;
+
+void wake_up_display(void) {
+  Serial.println("wake_display");
+#ifdef DISPLAY_ST7789
+  // turn on backlite
+  analogWrite(TFT_BACKLITE, 128);
+#endif
+  display_on = true;
+  ds3231_display(ds3231);
+}
+
+void sleep_display(void) {
+  Serial.println("sleep_display");
+#ifdef DISPLAY_SH1107
+  display.clearDisplay();
+  display.display();
+#else
+  display.fillScreen(BLACK);
+#endif
+#ifdef DISPLAY_ST7789
+  // turn off backlite
+  analogWrite(TFT_BACKLITE, 0);
+#endif
+  display_on = false;
+}
+
+// Sleep display after 5 mins.
+#define DISPLAY_SLEEP_MILLIS (1000 * 5 * 60)
+uint32_t millis_last_action = 0;
+
+void sleep_update(void) {
+  // Check the time and sleep display if we've been idle.
+  // We use millis since ds3231 time may be changing.
+  if (millis_last_action && (millis() - millis_last_action) > DISPLAY_SLEEP_MILLIS) {
+    if (display_on) {
+      sleep_display();
+    }
+  }
+}
+
+void sleep_tickle(void) {
+  // Reset display sleep countdown.
+  Serial.println("tickle");
+  millis_last_action = millis();
+  if (!display_on) {
+    wake_up_display();
+  }
+}
+
+// ======================================================
+// =========== Button management ==============
+// ======================================================
+
+#define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
+#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
+int button_pins[NUM_BUTTONS] = {9, 8, 7};
+#else
+int button_pins[NUM_BUTTONS] = {9, 6, 5};
+#endif
+int button_state[NUM_BUTTONS] = {0, 0, 0};
+unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
+// For distinguishing short/long press
+int button_down_time = 0;
+
+// Keeping track of user interaction to control display sleep.
+long secs_last_action = 0;
+
+#define DEBOUNCE_MILLIS 50
+#define MILLIS_LONG_PRESS 500
+
+void buttons_setup(void) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    pinMode(button_pins[button], INPUT_PULLUP);
+  }
+  sleep_tickle();
+}
+
+void buttons_update(void) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    // Buttons are pulled up, so read as 1 when open, 0 when pressed.
+    int new_state = 1 - digitalRead(button_pins[button]);
+    if (button_state[button] == new_state) {
+      continue;
+    }
+    // State has changed.
+    unsigned long millis_now = millis();
+    unsigned long millis_since_last_change = millis_now - button_last_change_time[button];
+    button_last_change_time[button] = millis_now;
+    if (millis_since_last_change <= DEBOUNCE_MILLIS) {
+      continue;
+    }
+    // Debounced state change
+    button_state[button] = new_state;
+    if (new_state) {
+      // State changed to "pressed"
+      button_down_time = millis_now;
+      continue;
+    }
+    // State change was to "released".
+    bool long_press = (millis_now - button_down_time) > MILLIS_LONG_PRESS;
+    Serial.print("Button ");
+    Serial.print(button);
+    if (long_press) {
+      Serial.println(" long press");
+    } else {
+      Serial.println(" short press");
+    }
+    // Action - tickle the screensaver.
+    sleep_tickle();
+    switch(button) {
+      case 0:
+        if (long_press) {
+          sleep_display();
+        } else {
+
+        }
+        break;
+      case 1:
+        // Increase aging register
+        if (long_press) {
+
+        } else {
+          ds3231_delta_aging(1);
+        }
+        break;
+      case 2:
+        if (long_press) {
+
+        } else {
+          ds3231_delta_aging(-1);
+        }
+        break;
+    }
+  }
+}
+
 // -------------------------------------------------------------------
 // Input commands over serial line
 
@@ -979,6 +1118,8 @@ void cmd_update(void) {
         handle_cmd(cmd0, cmd_buffer + 1);
         // Reprint command prompt.
         cmd_prompt();
+        // Interaction just happened - tickle screensaver.
+        sleep_tickle();
       }
       cmd_len = 0;
     } else {
@@ -1235,6 +1376,11 @@ bool check_alarm_match(DateTime &now, DateTime &alarm, uint8_t alarm_mode) {
   }
 }
 
+void ds3231_delta_aging(int delta) {
+  registers[DS3231_AGING] = (delta + (int8_t)registers[DS3231_AGING]);
+  registers_next[DS3231_AGING] = registers[DS3231_AGING];
+}
+
 #ifdef ARDUINO_ARCH_RP2040
 #define _BV(bit) (1 << bit)
 #endif
@@ -1337,7 +1483,7 @@ void clock_tick(void) {
 
 // --------- I2C Delegate handlers (on EXT_I2C) --------------
 
-uint8_t cursor = 0;  // Address of next register access.
+volatile uint8_t cursor = 0;  // Address of next register access.
 
 void receiveEvent(int howmany) {
   // Assume we got at least one data byte, and it's the cursor.
@@ -1396,10 +1542,22 @@ void write_registers_fn(uint8_t reg, const uint8_t* buffer, uint8_t num) {
 
 // ----------------- Merged emu and exp setup() and loop() ------------------------
 
-// Delegate I2C bus config.  This acts like the DS3231 chip.
-#define SDA_PIN A4
-#define SCL_PIN A5
-#define I2C_FREQ 100000
+#define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
+bool serial_available = false;
+void open_serial(int baudrate=9600) {
+  Serial.begin(baudrate);
+  // Wait for Serial port to open
+  int i = 0;
+  while (!Serial) {
+    delay(10);
+    ++i;
+    if (i > MAXWAIT_SERIAL) break;
+  }
+  if (i <= MAXWAIT_SERIAL) {
+    serial_available = true;
+  }
+  delay(1000);
+}
 
 void setup()
 {
@@ -1407,11 +1565,7 @@ void setup()
   pinMode(SQWV_PIN, OUTPUT);
   digitalWrite(SQWV_PIN, HIGH);  // Default state.
   
-  Serial.begin(9600);
-  // Wait for Serial port to open
-  while (!Serial) {
-    delay(10);
-  }
+  open_serial();
 
   Serial.print(F("DS3231_emu_exp "));
   Serial.print(__DATE__);
@@ -1432,7 +1586,7 @@ void setup()
   // Function to run when data received from master
   EXT_I2C.onReceive(receiveEvent);
 
-  // Setup ds3231 to use accessor functions.
+  // Setup ds3231 to use accessor functions instead of reading across I2C.
   ds3231.begin(&read_registers_fn, &write_registers_fn);
 
   // Emulator setup
@@ -1442,10 +1596,12 @@ void setup()
   // Explorer setup
   setup_display();
   cmd_setup();
+  buttons_setup();
 }
 
 int last_sec = 0;
 uint32_t last_tick_micros = 0;
+time_t secs_last_change = 0;
 
 void loop() {
   
@@ -1468,6 +1624,7 @@ void loop() {
   // Explorer loop
   
   cmd_update();
+  buttons_update();
 
   if (polling_interval || (enable_sqwv_int && (last_tick_micros != tick_micros))) {
     last_tick_micros = tick_micros;
@@ -1476,8 +1633,14 @@ void loop() {
     if (now_sec != last_sec) {
       last_sec = now_sec;
       //update_display(dt);
-      ds3231_display(ds3231);
+      if(display_on) {
+        ds3231_display(ds3231);
+      }
     }
   }
+
+  // Maybe sleep display
+  sleep_update();
+
   delay(polling_interval);
 }
