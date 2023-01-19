@@ -1186,6 +1186,84 @@ void timer_update_trim_ppb(int ppb) {
 
 #ifdef ARDUINO_ARCH_RP2040
 
+#define EXT_10MHZ_INPUT
+
+#ifdef EXT_10MHZ_INPUT
+#warning "Using EXT_10MHZ_INPUT"
+// PPS ticks come from external 10MHz input to RP2040 (i.e., OCXO)
+// Use the PWM counter as an external-input counter.
+
+#include "hardware/irq.h"
+#include "hardware/pwm.h"
+
+// Where the frequency to count is coming in.
+int timer_tenMHzInputPin = 19;  // Must be odd-numbered (PWM Chan B) pin.
+
+uint8_t timer_sliceNum = 0;
+
+uint32_t timer_count_max = 10000000; // 10 million
+
+volatile uint32_t timer_count = 0;
+volatile uint32_t timer_pwmTop = (1L << 16);
+
+void timer_on_pwm_wrap() {
+    // Clear the interrupt flag that brought us here
+    pwm_clear_irq(timer_sliceNum);
+    // Wind on the underlying counter.
+    timer_count += timer_pwmTop;
+
+    if (timer_count >= timer_count_max) {
+      // We hit the countdown: Make the callback.
+      clock_tick();
+      // Now re-init.
+      timer_count -= timer_count_max;  // Should give zero.
+      // Return to full-scale wrapping.
+      timer_pwmTop = (1L << 16);
+      pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+    } else if ((timer_count_max - timer_count) < (1L << 16)) {
+      // Adjust top for last ramp.
+      timer_pwmTop = (timer_count_max - timer_count);
+      pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+    }
+}
+
+void timer_setup_pwm_counter(uint8_t freq_pin) {
+    // Configure the PWM circuit to count pulses on freq_pin.
+    // Only the PWM B pins can be used as inputs.
+    assert(pwm_gpio_to_channel(freq_pin) == PWM_CHAN_B);
+    timer_sliceNum = pwm_gpio_to_slice_num(freq_pin);
+
+    // Count once for every rising edge on PWM B input
+    pwm_config cfg = pwm_get_default_config();
+    pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_B_RISING);
+    pwm_config_set_clkdiv(&cfg, 1);
+    pwm_init(timer_sliceNum, &cfg, false);
+    gpio_set_function(freq_pin, GPIO_FUNC_PWM);
+    pwm_set_enabled(timer_sliceNum, true);
+    pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+
+    // Setup the wraparound interrupt.
+    // Mask our slice's IRQ output into the PWM block's single interrupt line,
+    // and register our interrupt handler
+    pwm_clear_irq(timer_sliceNum);
+    pwm_set_irq_enabled(timer_sliceNum, true);
+    irq_set_exclusive_handler(PWM_IRQ_WRAP, timer_on_pwm_wrap);
+    irq_set_enabled(PWM_IRQ_WRAP, true);
+}
+
+void timer_setup(void) {
+  // Setup regular timer interrupt.
+  timer_setup_pwm_counter(timer_tenMHzInputPin);
+}
+
+void timer_reset_sync(void) {
+  // Clear the count to zero, restart the PWM counter too.
+  timer_count = 0;
+  pwm_set_counter(timer_sliceNum, 0);
+}
+
+#else // !EXT_10MHZ_INPUT - use RP2040 built-in timer
+
 static bool _repeating_timer_callback(struct repeating_timer *t) {
   clock_tick();
   cumulated_nanos += nanosecs_per_sec_trim;
@@ -1210,6 +1288,8 @@ void timer_reset_sync(void) {
   cancel_repeating_timer(&mTimer);
   timer_setup();
 }
+
+#endif  // !EXT_10MHZ_INPUT
 
 #endif  // RP2040
 
