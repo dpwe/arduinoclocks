@@ -288,7 +288,7 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
   }
 }
 
-void ds3231_display(class RTC_DS3231& ds3231) {
+void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
   // HHHH::MMMM::SSSS (double-size)
@@ -303,6 +303,12 @@ void ds3231_display(class RTC_DS3231& ds3231) {
   // SS MM HH OO DD MM YY  - maybe 7 bytes with N extra pixels between bytes = 7x12 + Nx6 - 96 for N=2, 120 for N=6 (128 is 21 chars @6)
   // S1 M1 H1 D1 M2 H2 D2
   // CC SS AO TH TL
+
+  // Clock source identifier tag
+  display.setTextSize(SMALL_SIZE);
+  display.setTextColor(RED, BLACK);
+  display.setCursor(18 * CHAR_W, 0);
+  display.print(clock_name);
 
   // Time, double size.
   display.setTextSize(LARGE_SIZE);
@@ -637,58 +643,6 @@ void print_registers_fancy(uint8_t *registers) {
   Serial.print('.');
   Serial.println(25 * (registers[18] >> 6), 10);
   Serial.println("");
-}
-
-// ------------- Display sleep (screensaver) -----------
-
-bool display_on = true;
-
-void wake_up_display(void) {
-  Serial.println("wake_display");
-#ifdef DISPLAY_ST7789
-  // turn on backlite
-  analogWrite(TFT_BACKLITE, 128);
-#endif
-  display_on = true;
-  ds3231_display(ds3231);
-}
-
-void sleep_display(void) {
-  Serial.println("sleep_display");
-#ifdef DISPLAY_SH1107
-  display.clearDisplay();
-  display.display();
-#else
-  display.fillScreen(BLACK);
-#endif
-#ifdef DISPLAY_ST7789
-  // turn off backlite
-  analogWrite(TFT_BACKLITE, 0);
-#endif
-  display_on = false;
-}
-
-// Sleep display after 5 mins.
-#define DISPLAY_SLEEP_MILLIS (1000 * 5 * 60)
-uint32_t millis_last_action = 0;
-
-void sleep_update(void) {
-  // Check the time and sleep display if we've been idle.
-  // We use millis since ds3231 time may be changing.
-  if (millis_last_action && (millis() - millis_last_action) > DISPLAY_SLEEP_MILLIS) {
-    if (display_on) {
-      sleep_display();
-    }
-  }
-}
-
-void sleep_tickle(void) {
-  // Reset display sleep countdown.
-  Serial.println("tickle");
-  millis_last_action = millis();
-  if (!display_on) {
-    wake_up_display();
-  }
 }
 
 // ======================================================
@@ -1196,15 +1150,33 @@ void timer_update_trim_ppb(int ppb) {
 #include "hardware/irq.h"
 #include "hardware/pwm.h"
 
+const char *clock_name = "10M";
+
 // Where the frequency to count is coming in.
 int timer_tenMHzInputPin = 19;  // Must be odd-numbered (PWM Chan B) pin.
 
 uint8_t timer_sliceNum = 0;
 
-uint32_t timer_count_max = 10000000; // 10 million
-
+//uint32_t timer_count_max = 10000000; // 10 million
+uint32_t timer_count_max = 9999999; // Trying to match to actual clock, 4ppm slow
+volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
 volatile uint32_t timer_pwmTop = (1L << 16);
+
+void one_sec_callback() {
+  // Make the callback to the RTC simulator.
+  clock_tick();
+  // Setup for next alarm, including cumulated nanos.
+  timer_count -= timer_count_max_this_time;  // Should give zero.
+  // Figure fine-tuning.
+  cumulated_nanos += nanosecs_per_sec_trim;
+  int centinanos_offset = cumulated_nanos / 100;
+  cumulated_nanos -= centinanos_offset * 100;
+  timer_count_max_this_time = timer_count_max + centinanos_offset;
+  // Return to full-scale wrapping.
+  timer_pwmTop = (1L << 16);
+  pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+}
 
 void timer_on_pwm_wrap() {
     // Clear the interrupt flag that brought us here
@@ -1212,17 +1184,11 @@ void timer_on_pwm_wrap() {
     // Wind on the underlying counter.
     timer_count += timer_pwmTop;
 
-    if (timer_count >= timer_count_max) {
-      // We hit the countdown: Make the callback.
-      clock_tick();
-      // Now re-init.
-      timer_count -= timer_count_max;  // Should give zero.
-      // Return to full-scale wrapping.
-      timer_pwmTop = (1L << 16);
-      pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
-    } else if ((timer_count_max - timer_count) < (1L << 16)) {
+    if (timer_count >= timer_count_max_this_time) {
+      one_sec_callback();
+    } else if ((timer_count_max_this_time - timer_count) < (1L << 16)) {
       // Adjust top for last ramp.
-      timer_pwmTop = (timer_count_max - timer_count);
+      timer_pwmTop = (timer_count_max_this_time - timer_count);
       pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
     }
 }
@@ -1241,6 +1207,7 @@ void timer_setup_pwm_counter(uint8_t freq_pin) {
     gpio_set_function(freq_pin, GPIO_FUNC_PWM);
     pwm_set_enabled(timer_sliceNum, true);
     pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+    timer_count_max_this_time = timer_count_max;
 
     // Setup the wraparound interrupt.
     // Mask our slice's IRQ output into the PWM block's single interrupt line,
@@ -1263,6 +1230,8 @@ void timer_reset_sync(void) {
 }
 
 #else // !EXT_10MHZ_INPUT - use RP2040 built-in timer
+
+const char *clock_name = "RP2";
 
 static bool _repeating_timer_callback(struct repeating_timer *t) {
   clock_tick();
@@ -1294,6 +1263,8 @@ void timer_reset_sync(void) {
 #endif  // RP2040
 
 #ifdef ESP32
+
+const char *clock_name = "E32";
 
 hw_timer_t * timer = NULL;
 
@@ -1501,9 +1472,9 @@ void ds3231_tick(uint8_t *registers, uint8_t advance=1) {
       registers[DS3231_OUTPINSTATE] = HIGH;
     }
   }
-  // Update the trim by 10 ppb per aging offset.  Positive aging offset makes clock slower.
+  // Update the trim by ?1 ppb per aging offset.  Positive aging offset makes clock slower.
   // Maybe we should only do this when it is changed, i.e. check writes to AGING register?
-  timer_update_trim_ppb(10 * (int)((int8_t)registers[DS3231_AGING]));
+  timer_update_trim_ppb(1 * (int)((int8_t)registers[DS3231_AGING]));
 }
 
 void ds3231_setup_next_tick(int advance=1) {
@@ -1560,6 +1531,58 @@ void clock_tick(void) {
   tick_micros = micros();
 }
 
+
+// ------------- Display sleep (screensaver) -----------
+
+bool display_on = true;
+
+void wake_up_display(void) {
+  Serial.println("wake_display");
+#ifdef DISPLAY_ST7789
+  // turn on backlite
+  analogWrite(TFT_BACKLITE, 128);
+#endif
+  display_on = true;
+  ds3231_display(ds3231, clock_name);
+}
+
+void sleep_display(void) {
+  Serial.println("sleep_display");
+#ifdef DISPLAY_SH1107
+  display.clearDisplay();
+  display.display();
+#else
+  display.fillScreen(BLACK);
+#endif
+#ifdef DISPLAY_ST7789
+  // turn off backlite
+  analogWrite(TFT_BACKLITE, 0);
+#endif
+  display_on = false;
+}
+
+// Sleep display after 5 mins.
+#define DISPLAY_SLEEP_MILLIS (1000 * 5 * 60)
+uint32_t millis_last_action = 0;
+
+void sleep_update(void) {
+  // Check the time and sleep display if we've been idle.
+  // We use millis since ds3231 time may be changing.
+  if (millis_last_action && (millis() - millis_last_action) > DISPLAY_SLEEP_MILLIS) {
+    if (display_on) {
+      sleep_display();
+    }
+  }
+}
+
+void sleep_tickle(void) {
+  // Reset display sleep countdown.
+  Serial.println("tickle");
+  millis_last_action = millis();
+  if (!display_on) {
+    wake_up_display();
+  }
+}
 
 // --------- I2C Delegate handlers (on EXT_I2C) --------------
 
@@ -1714,7 +1737,7 @@ void loop() {
       last_sec = now_sec;
       //update_display(dt);
       if(display_on) {
-        ds3231_display(ds3231);
+        ds3231_display(ds3231, clock_name);
       }
     }
   }
