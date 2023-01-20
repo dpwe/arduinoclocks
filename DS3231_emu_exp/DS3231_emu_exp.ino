@@ -1103,7 +1103,7 @@ void cmd_update(void) {
 #define DS3231_TEMPERATUREREG                                                  \
   0x11 ///< Temperature register (high byte - low byte is at 0x12), 10-bit
        ///< temperature value
-#define DS3231_OUTPINSTATE    0x12 /// We use this byte to store the output pin state.  It's not in the chip.
+#define DS3231_OUTPINSTATE    0x13 /// We use this byte to store the output pin state.  It's not in the chip.
 
 #define DS3231_C_A1IE 0  // Alarm 1 Interrupt Enable is bit 0 of Control
 #define DS3231_C_A2IE 1  // Alarm 2 Interrupt Enable
@@ -1158,7 +1158,7 @@ int timer_tenMHzInputPin = 19;  // Must be odd-numbered (PWM Chan B) pin.
 uint8_t timer_sliceNum = 0;
 
 //uint32_t timer_count_max = 10000000; // 10 million
-uint32_t timer_count_max = 9999999; // Trying to match to actual clock, 4ppm slow
+uint32_t timer_count_max = 9999999; // Trying to match to actual clock, ~0.07ppm slow
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
 volatile uint32_t timer_pwmTop = (1L << 16);
@@ -1300,6 +1300,54 @@ void timer_reset_sync(void) {
 }
 
 #endif // ESP32
+
+// ----- Temperature sensor -----
+
+#ifdef ARDUINO_ARCH_RP2040
+
+// Read the on-chip temp sensor with ADC
+// See
+// https://learnembeddedsystems.co.uk/using-the-rp2040-on-board-temperature-sensor
+
+#include "hardware/adc.h"
+
+void temperature_setup(void) {
+  // Configure ADC
+  adc_init();
+  adc_set_temp_sensor_enabled(true);
+  adc_select_input(4);  // 5th ADC channel == temp sensor.
+}
+
+int temperature_get(void) {
+  // Return current temperature in quarter-Cs.
+  // Temp sensor V_be is nominally 0.706 v at 27 degC 
+  // with a slope of -1.721 mV/deg.
+  // temp_quarter-Cs = 4 * (27 - ((3.3 * adc_read() / 4096) - 0.706) / 0.001721)
+  //                 = 4 * (27 - (0.468 * adc_read() - 410.22))
+  //                 = 4 * (437.22 - 0.468 * adc_read())
+  //                 = 
+  //  = 108 - (13.2 / 4096 * adc_read() * 581 + 4*410
+  //  = 1748.9 - 1.872 * adc_read()
+  //  =/= 1749 - (15/8) * adc_read()
+  //float adc_volts = (3.3f * adc_read()) / (float)(1L<<12);
+  //float temperature = 27 - (adc_volts - 0.706) / 0.001721;
+  //return temperature;
+  return 1749 - ((15 * adc_read()) >> 3);
+}
+
+#else // !RP2040
+
+void temperature_setup(void) {
+  // nothing.
+}
+
+int temperature_get(void) {
+  // Return current temperature in quarter-Cs.
+  // dummy.
+  return (4* 25);
+}
+
+#endif // !RP2040
 
 // ----- DS3231 emulation -----
 #include "RTClib.h"  // For DateTime etc.
@@ -1472,6 +1520,12 @@ void ds3231_tick(uint8_t *registers, uint8_t advance=1) {
       registers[DS3231_OUTPINSTATE] = HIGH;
     }
   }
+  // Update temperature - quantizede to quarter-degrees.
+  int quantized_temp = temperature_get();
+  registers[DS3231_TEMPERATUREREG] = (quantized_temp >> 2);
+  // Fractional degrees
+  registers[DS3231_TEMPERATUREREG + 1] = (quantized_temp & 3) << 6;
+  
   // Update the trim by ?1 ppb per aging offset.  Positive aging offset makes clock slower.
   // Maybe we should only do this when it is changed, i.e. check writes to AGING register?
   timer_update_trim_ppb(1 * (int)((int8_t)registers[DS3231_AGING]));
@@ -1695,6 +1749,7 @@ void setup()
   // Emulator setup
   ds3231_setup();
   timer_setup();
+  temperature_setup();
 
   // Explorer setup
   setup_display();
