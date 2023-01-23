@@ -492,12 +492,15 @@ void update_GPS(void) {
     sync_time_from_GPS();
     // Request for sync e.g. from button press.
     if (request_sync_RTC) {
-      request_sync_RTC->rtc.adjust(DateTime(gps_clock.unixtime()));
+      time_t unix_time = gps_clock.unixtime();
+      // Delay almost a second, to compensate for setting delay
+      delayMicroseconds(996300);
+      request_sync_RTC->rtc.adjust(DateTime(unix_time + 1));
       request_sync_RTC->pclock->clear_sync_history();  // Old sync records are irrelevant now.
-      request_sync_RTC = NULL;
       Serial.print("Set ");
       Serial.print(request_sync_RTC->pclock->name_);
       Serial.println(" DS3231 from GPS.");
+      request_sync_RTC = NULL;
     }
     if (request_sync_output) {
       emit_sync_command(gps_clock.unixtime());
