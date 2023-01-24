@@ -801,7 +801,59 @@ void serial_print_registers(void) {
 
 #endif
 
-bool display_on = false;
+// ------------- Display sleep (screensaver) -----------
+
+bool display_on = true;
+
+void wake_up_display(void) {
+  Serial.println("wake_display");
+#ifdef DISPLAY_ST7789
+  // turn on backlite
+  analogWrite(TFT_BACKLITE, 128);
+#endif
+  display_on = true;
+  update_display(active_rtc);
+}
+
+void sleep_display(void) {
+  Serial.println("sleep_display");
+#ifdef DISPLAY_SH1107
+  display.clearDisplay();
+  display.display();
+#else
+  display.fillScreen(BLACK);
+#endif
+#ifdef DISPLAY_ST7789
+  // turn off backlite
+  analogWrite(TFT_BACKLITE, 0);
+#endif
+  display_on = false;
+}
+
+// Sleep display after 5 mins.
+#define DISPLAY_SLEEP_MILLIS (1000 * 5 * 60)
+uint32_t millis_last_action = 0;
+
+void sleep_update(void) {
+  // Check the time and sleep display if we've been idle.
+  // We use millis since ds3231 time may be changing.
+  if (millis_last_action && (millis() - millis_last_action) > DISPLAY_SLEEP_MILLIS) {
+    if (display_on) {
+      sleep_display();
+    }
+  }
+}
+
+void sleep_tickle(void) {
+  // Reset display sleep countdown.
+  Serial.println("tickle");
+  millis_last_action = millis();
+  if (!display_on) {
+    wake_up_display();
+  }
+}
+
+// --------- display routines -------
 
 void setup_display(void) {
 #ifdef DISPLAY_SSD1351
@@ -849,21 +901,6 @@ void setup_display(void) {
   #define CHAR_W 12
 #endif
 
-void wake_up_display(void) {
-  display_on = true;
-  update_display(active_rtc);
-}
-
-void sleep_display(void) {
-#ifdef DISPLAY_SH1107
-  display.clearDisplay();
-  display.display();
-#else
-  display.fillScreen(BLACK);
-#endif
-  display_on = false;
-}
-
 void update_display(class DS3231_holder *prtc) {
   if (!display_on) {
     return;
@@ -909,9 +946,6 @@ unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
 // For distinguishing short/long press
 int button_down_time = 0;
 
-// Keeping track of user interaction to control display sleep.
-long secs_last_action = 0;
-
 #define DEBOUNCE_MILLIS 50
 #define MILLIS_LONG_PRESS 500
 
@@ -919,7 +953,7 @@ void buttons_setup(time_t t) {
   for (int button = 0; button < NUM_BUTTONS; ++button) {
     pinMode(button_pins[button], INPUT_PULLUP);
   }
-  secs_last_action = t;
+  sleep_tickle();
 }
 
 void swap_rtcs(void) {
@@ -938,7 +972,7 @@ void buttons_update(time_t t) {
       continue;
     }
     // State has changed.
-    secs_last_action = t;  // Reset sleep display timeout.
+    sleep_tickle();  // Reset sleep display timeout.
     unsigned long millis_now = millis();
     unsigned long millis_since_last_change = millis_now - button_last_change_time[button];
     button_last_change_time[button] = millis_now;
@@ -1012,7 +1046,7 @@ int cmd_len = 0;
 
 void cmd_update(time_t t) {
   if (Serial.available() > 0) {
-    secs_last_action = t;  // Reset sleep display timeout.
+    sleep_tickle();  // Reset sleep display timeout.
     // read the incoming byte:
     char new_char = Serial.read();
     if (new_char == '\n') {
@@ -1141,10 +1175,6 @@ void setup() {
 // How long can we miss syncs before we give up on GPS clock?
 #define GPS_TIMEOUT_SECS 5
 
-// How long before screen dims?
-#define DISPLAY_SLEEP_SECS 300
-time_t last_action = 0;
-
 boolean gps_has_been_live = false;
 
 time_t secs_last_change = 0;
@@ -1179,8 +1209,5 @@ void loop() {
     // And on display:
     update_display(active_rtc);
   }
-  // Maybe sleep display
-  if (secs_last_action && (sys_secs - secs_last_action) > DISPLAY_SLEEP_SECS) {
-    sleep_display();
-  }
+  sleep_update();
 }
