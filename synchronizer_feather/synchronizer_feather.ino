@@ -703,6 +703,82 @@ void serial_print_registers(void) {
   Serial.println("");
 }
 
+// ----- Temperature sensor -----
+
+#ifdef ARDUINO_ARCH_RP2040
+
+// Read the on-chip temp sensor with ADC
+// See
+// https://learnembeddedsystems.co.uk/using-the-rp2040-on-board-temperature-sensor
+
+#include "hardware/adc.h"
+
+void temperature_setup(void) {
+  // Configure ADC
+  adc_init();
+  adc_set_temp_sensor_enabled(true);
+  adc_select_input(4);  // 5th ADC channel == temp sensor.
+}
+
+int temperature_get(void) {
+  // Return current temperature in quarter-Cs.
+  // Temp sensor V_be is nominally 0.706 v at 27 degC 
+  // with a slope of -1.721 mV/deg.
+  // temp_quarter-Cs = 4 * (27 - ((3.3 * adc_read() / 4096) - 0.706) / 0.001721)
+  //                 = 4 * (27 - (0.468 * adc_read() - 410.22))
+  //                 = 4 * (437.22 - 0.468 * adc_read())
+  //                 = 
+  //  = 108 - (13.2 / 4096 * adc_read() * 581 + 4*410
+  //  = 1748.9 - 1.872 * adc_read()
+  //  =/= 1749 - (15/8) * adc_read()
+  //float adc_volts = (3.3f * adc_read()) / (float)(1L<<12);
+  //float temperature = 27 - (adc_volts - 0.706) / 0.001721;
+  //return temperature;
+  return 1749 - ((15 * adc_read()) >> 3);
+}
+
+#else // !RP2040
+
+#ifdef ESP32
+// EPS32 onboard temp sensor
+// See 
+// https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/temp_sensor.html
+
+//#include "driver/temperature_sensor.h"
+
+void temperature_setup(void) {
+    //temperature_sensor_handle_t temp_sensor = NULL;
+    //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+    //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
+    //temperature_sensor_enable(temp_sensor);
+}
+
+// Copied from esp32.../esp32-hal.h, undocumented??  Returns C.
+float temperatureRead();
+
+int temperature_get(void) {
+  // Return current temperature in quarter-Cs.
+    float tsens_value;
+    //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
+    tsens_value = temperatureRead();
+    return (int)(round( 4 * tsens_value));
+}
+    
+#else // !ESP32
+
+void temperature_setup(void) {
+  // nothing.
+}
+
+int temperature_get(void) {
+  // Return current temperature in quarter-Cs.
+  // dummy.
+  return (4* 25);
+}
+
+#endif  // !ESP32
+#endif  // !RP2040
+
 
 // ======================================================
 // =========== OLED Display ==============
@@ -1166,6 +1242,8 @@ void setup() {
   buttons_setup(sys_clock->unixtime());
   Serial.println("cmd setup...");
   cmd_setup();
+  Serial.println("temp sensor setup...");
+  temperature_setup();
 
   Serial.println("interrupts setup...");
   setup_interrupts();
@@ -1202,6 +1280,9 @@ void loop() {
   update_GPS_serial();
   if ((secs_last_change != sys_secs)) {
     secs_last_change = sys_secs;
+    Serial.print("t=");
+    Serial.print(temperature_get() / 4.0f);
+    Serial.print(" ");
     serial_clock_debug(&gps_clock);
     serial_clock_debug(int_rtc.pclock);
     serial_clock_debug(ext_rtc.pclock);

@@ -1337,6 +1337,33 @@ int temperature_get(void) {
 
 #else // !RP2040
 
+#ifdef ESP32
+// EPS32 onboard temp sensor
+// See 
+// https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/temp_sensor.html
+
+//#include "driver/temperature_sensor.h"
+
+void temperature_setup(void) {
+    //temperature_sensor_handle_t temp_sensor = NULL;
+    //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+    //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
+    //temperature_sensor_enable(temp_sensor);
+}
+
+// Copied from esp32.../esp32-hal.h, undocumented??  Returns C.
+float temperatureRead();
+
+int temperature_get(void) {
+  // Return current temperature in quarter-Cs.
+    float tsens_value;
+    //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
+    tsens_value = temperatureRead();
+    return (int)(round( 4 * tsens_value));
+}
+    
+#else // !ESP32
+
 void temperature_setup(void) {
   // nothing.
 }
@@ -1347,7 +1374,8 @@ int temperature_get(void) {
   return (4* 25);
 }
 
-#endif // !RP2040
+#endif  // !ESP32
+#endif  // !RP2040
 
 // ----- DS3231 emulation -----
 #include "RTClib.h"  // For DateTime etc.
