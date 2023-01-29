@@ -33,17 +33,17 @@ const int ledPin = 13; // On-board LED
 // 24/25 - were originally my interrupt inputs, but YAY we have a winner.  Interrupts move to A2/A3
 //#ifdef DS3231_ON_EXTERNAL_I2C
 #ifdef ARDUINO_ARCH_RP2040
-const int ext_sda_pin = 24;   // Same physical pins on Feather, but different names.
+const int int_sqwPin = 27;   // (A1) SQWV output from Feather (internal) DS3231
+const int ppsPin = 28;       // (A2) PPS output from GPS board
+const int ext_sqwPin = 29;   // (A3) SQWV output from external DS3231
+const int ext_sda_pin = 24;  // Same physical pins on Feather, but different names.
 const int ext_scl_pin = 25;
-const int ext_sqwPin = 29; // (A3) SQWV output from external DS3231
-const int int_sqwPin = 27; // (A1) SQWV output from Feather (internal) DS3231
-const int ppsPin = 28; // (A2) PPS output from GPS board
 #else 
+const int int_sqwPin = A1;   // (A1) SQWV output from Feather (internal) DS3231
+const int ppsPin = A2;       // (A2) PPS output from GPS board
+const int ext_sqwPin = A3;   // (A3) SQWV output from external DS3231
 const int ext_sda_pin = A4;
 const int ext_scl_pin = A5;
-const int ext_sqwPin = A3; // (A3) SQWV output from external DS3231
-const int int_sqwPin = A1; // (A1) SQWV output from Feather (internal) DS3231
-const int ppsPin = A2; // (A2) PPS output from GPS board
 #endif
 //#else
 // If using standard Feather I2C...
@@ -67,24 +67,37 @@ volatile unsigned long int_rtc_micros = 0;
 volatile unsigned long ext_rtc_micros = 0;
 volatile unsigned long gps_micros = 0;
 
+volatile unsigned long int_rtc_period_micros = 0;
+volatile unsigned long ext_rtc_period_micros = 0;
+volatile unsigned long gps_period_micros = 0;
+
 void int_rtc_mark_isr(void)
 {
-  int_rtc_micros = micros();
+  unsigned long m = micros();
+  int_rtc_period_micros = m - int_rtc_micros;
+  int_rtc_micros = m;
 }
 void ext_rtc_mark_isr(void)
 {
-  ext_rtc_micros = micros();
+  unsigned long m = micros();
+  ext_rtc_period_micros = m - ext_rtc_micros;
+  ext_rtc_micros = m;
 }
 void gps_mark_isr(void)
 {
-  gps_micros = micros();
+  unsigned long m = micros();
+  gps_period_micros = m - gps_micros;
+  gps_micros = m;
 }
 
 void setup_interrupts() {
   // DS3231 is on falling edge.
+  pinMode(int_sqwPin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(int_sqwPin), int_rtc_mark_isr, FALLING);
+  pinMode(ext_sqwPin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ext_sqwPin), ext_rtc_mark_isr, FALLING);
   // GPS mark is on rising edge.
+  pinMode(ppsPin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
 } 
 
@@ -135,17 +148,6 @@ class Clock {
     // Use ref, because ref.micros_per_sec is less likely to be wildly off.
     long micros_per_sec = (ref.decimicros_per_sec_ + 5) / 10;  // Apply rounding.
     long skew_us = ((long)(base_micros_ - ref.base_micros_)) - micros_per_sec * ((long)(base_unixtime_ - ref.base_unixtime_));
-    if (skew_us < -900) {
-      // Tracking bug
-      Serial.print("this base_micros=");
-      Serial.print(base_micros_);
-      Serial.print(" unix_sec=");
-      Serial.println(base_unixtime_ % 3600);
-      Serial.print("ref  base_micros=");
-      Serial.print(ref.base_micros_);
-      Serial.print(" unix_sec=");
-      Serial.println(ref.base_unixtime_ % 3600);
-    }
     return skew_us;
   }
 
@@ -164,7 +166,6 @@ class Clock {
     }
     if (sync_count_ > min_sync_count_) {
       if (oldest_sync_micros_ == 0) {
-        Serial.println("oldest_sync_micros_ 0");
         oldest_sync_micros_ = sync_micros;
         oldest_sync_unixtime_ = sync_unixtime;
         older_sync_micros_ = sync_micros;
@@ -215,7 +216,7 @@ class Clock {
     //Serial.print(" in ");
     //Serial.print(interval_seconds);
     //Serial.print(" seconds = ");
-    int nanoseconds_error = (1000 * micros_drift) / (int)measurement_period_secs_;
+    int nanoseconds_error = (1000 * micros_drift) / (long)measurement_period_secs_;
     //Serial.print(nanoseconds_error);
     //Serial.println(" ns err");
     ppm_tracking_ = true;
@@ -621,9 +622,9 @@ char *sprint_clock_comparison(char *s, class Clock& clock, class Clock& ref_cloc
   //strcpy(s, "ppm ");
   //s += strlen(s);
   if (clock.ppm_tracking_) {
-    Serial.print(clock.name_);
-    Serial.print(" ppm_tracking: ");
-    Serial.println(clock.nanoseconds_error_per_sec_);
+    //Serial.print(clock.name_);
+    //Serial.print(" ppm_tracking: ");
+    //Serial.println(clock.nanoseconds_error_per_sec_);
     // A positive ppm means ref clock has more nanosecs per tick than comparison clock
     // i.e. comparison clock is running fast (and so aging register loading should be
     // increased).
@@ -670,7 +671,7 @@ void serial_print_clock_comparison(class Clock& clock, class Clock& ref_clock) {
 }
 
 void serial_clock_debug(class Clock* pclock) {
-    char s[9];
+  char s[9];
   Serial.print(" ");
   Serial.print(pclock->name_);
   Serial.print(": ");
@@ -686,7 +687,6 @@ void serial_clock_debug(class Clock* pclock) {
   sprint_unixtime(s, pclock->older_sync_unixtime_, false);
   Serial.print(s);
 }
-
 
 #define NUM_REGISTERS 19
 
@@ -882,7 +882,6 @@ int temperature_get(void) {
 bool display_on = true;
 
 void wake_up_display(void) {
-  Serial.println("wake_display");
 #ifdef DISPLAY_ST7789
   // turn on backlite
   analogWrite(TFT_BACKLITE, 128);
@@ -892,7 +891,6 @@ void wake_up_display(void) {
 }
 
 void sleep_display(void) {
-  Serial.println("sleep_display");
 #ifdef DISPLAY_SH1107
   display.clearDisplay();
   display.display();
@@ -922,7 +920,6 @@ void sleep_update(void) {
 
 void sleep_tickle(void) {
   // Reset display sleep countdown.
-  Serial.println("tickle");
   millis_last_action = millis();
   if (!display_on) {
     wake_up_display();
@@ -1120,6 +1117,8 @@ void cmd_setup(void) {
 char cmd_buffer[CMD_BUF_LEN];
 int cmd_len = 0;
 
+int do_logging = 1;
+
 void cmd_update(time_t t) {
   if (Serial.available() > 0) {
     sleep_tickle();  // Reset sleep display timeout.
@@ -1138,6 +1137,7 @@ void cmd_update(time_t t) {
             Serial.println("S    - Swap DS3231 internal/external");
             Serial.println("Axx  - Set Aging Offset -128 to 127");
             Serial.println("D    - Dim screen");
+            Serial.println("Lx   - Logging on (1) / off (0)");
             break;
           case 'Y':
             // Sync DS3231 to GPS
@@ -1159,13 +1159,19 @@ void cmd_update(time_t t) {
               wake_up_display();
             }
             break;
+          case 'L':
+            // Logging on / off
+            do_logging = atoi(cmd_buffer + 1);
+            break;
           case 'A':
             // Set DS3231 aging register.
-            int aging_offset = atoi(cmd_buffer + 1);
-            active_rtc->setAgingOffset(aging_offset);
-            Serial.print("Aging offset set to ");
-            Serial.println(aging_offset);
-            update_display(active_rtc);
+            {
+              int aging_offset = atoi(cmd_buffer + 1);
+              active_rtc->setAgingOffset(aging_offset);
+              Serial.print("Aging offset set to ");
+              Serial.println(aging_offset);
+              update_display(active_rtc);
+            }
             break;
         }
       }
@@ -1280,13 +1286,43 @@ void loop() {
   update_GPS_serial();
   if ((secs_last_change != sys_secs)) {
     secs_last_change = sys_secs;
-    Serial.print("t=");
-    Serial.print(temperature_get() / 4.0f);
-    Serial.print(" ");
-    serial_clock_debug(&gps_clock);
-    serial_clock_debug(int_rtc.pclock);
-    serial_clock_debug(ext_rtc.pclock);
-    Serial.println();
+    if (do_logging) {
+      // Logging is unixtime, local temp, time since gps (0), gps period, iRTC temp, time since gps, irtc period,q
+      // extrtc temp, time since gps, extrtc period
+      Serial.print(sys_secs);
+      Serial.print(", ");
+
+      Serial.print(temperature_get() / 4.0f);
+      Serial.print(", ");
+      Serial.print(gps_micros - gps_micros);
+      Serial.print(", ");
+      Serial.print(gps_period_micros);
+      Serial.print(", ");
+
+      Serial.print(int_rtc.rtc_temperature_centidegs / 100.f);
+      Serial.print(", ");
+      Serial.print((long)(int_rtc_micros - gps_micros));
+      Serial.print(", ");
+      Serial.print(int_rtc_period_micros);
+      Serial.print(", ");
+
+      Serial.print(ext_rtc.rtc_temperature_centidegs / 100.f);
+      Serial.print(", ");
+      Serial.print((long)(ext_rtc_micros - gps_micros));
+      Serial.print(", ");
+      Serial.print(ext_rtc_period_micros);
+      Serial.println();
+
+    } else {
+      // No logging.
+      //Serial.print("t=");
+      //Serial.print(temperature_get() / 4.0f);
+      //Serial.print(" ");
+      //serial_clock_debug(&gps_clock);
+      //serial_clock_debug(int_rtc.pclock);
+      //serial_clock_debug(ext_rtc.pclock);
+      //Serial.println();
+    }
     // And on display:
     update_display(active_rtc);
   }
