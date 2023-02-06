@@ -495,7 +495,13 @@ void update_GPS(void) {
     if (request_sync_RTC) {
       time_t unix_time = gps_clock.unixtime();
       // Delay almost a second, to compensate for setting delay
-      delayMicroseconds(996300);
+      if (request_sync_RTC == &ext_rtc) {
+        // Slow-update emulated external RTC.
+        delayMicroseconds(996300);
+      } else {
+        // Faster internal RTC
+        delayMicroseconds(998500);
+      }
       request_sync_RTC->rtc.adjust(DateTime(unix_time + 1));
       request_sync_RTC->pclock->clear_sync_history();  // Old sync records are irrelevant now.
       Serial.print("Set ");
