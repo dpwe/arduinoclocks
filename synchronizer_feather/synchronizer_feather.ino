@@ -87,14 +87,12 @@ void _on_pwm_wrap() {
 #endif
 
 void decimicros_setup() {
-#ifdef EPS32
+#ifdef ESP32
   // After https://espressif-docs.readthedocs-hosted.com/projects/arduino-esp32/en/latest/api/timer.html
   // Use 1st timer of 4 (counted from zero).
   // Set 8 divider for prescaler to get 0.1us counts.
-  timer = timerBegin(/* timer */ 0, /* prescaler */ 8, /* count_direction_up */ true);
+  decimicros_timer = timerBegin(/* timer */ 0, /* prescaler */ 8, /* count_direction_up */ true);
 
-  // Attach onTimer function to our timer.
-  timerAttachInterrupt(timer, &onTimer, true);
 #else // !ESP32
 #ifdef ARDUINO_ARCH_RP2040
   // Use 16 bit PWM counter.
@@ -822,7 +820,7 @@ int temperature_get(void) {
 #else // !RP2040
 
 #ifdef ESP32
-// EPS32 onboard temp sensor
+// ESP32 onboard temp sensor
 // See 
 // https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/temp_sensor.html
 
