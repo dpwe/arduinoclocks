@@ -63,7 +63,9 @@ const int ext_scl_pin = A5;
 // 10 MHz counter 
 // for 0.1 us resolution measurements
 // ---------------------------
+#define USE_DECIMICROS
 
+#ifdef USE_DECIMICROS
 #ifdef ESP32
 hw_timer_t * decimicros_timer = NULL;
 #endif
@@ -91,7 +93,8 @@ void decimicros_setup() {
   // After https://espressif-docs.readthedocs-hosted.com/projects/arduino-esp32/en/latest/api/timer.html
   // Use 1st timer of 4 (counted from zero).
   // Set 8 divider for prescaler to get 0.1us counts.
-  decimicros_timer = timerBegin(/* timer */ 0, /* prescaler */ 8, /* count_direction_up */ true);
+  decimicros_timer = timerBegin(/* timer */ 1, /* prescaler */ 8, /* count_direction_up */ true);
+  // Unfortunately, Arduino-API timer calls seem to be disasterous, specifically calling timerRead in the PPS interrupts.
 
 #else // !ESP32
 #ifdef ARDUINO_ARCH_RP2040
@@ -133,6 +136,17 @@ unsigned long decimicros() {
 #endif // !ESP32
 }
 
+#define MICROS_FUNCTION micros
+
+#else // !USE_DECIMICROS
+
+void decimicros_setup() {
+}
+
+#define decimicros micros
+
+#endif
+
 // =============================================================
 // PPS change time recording.
 // =============================================================
@@ -147,19 +161,19 @@ volatile unsigned long gps_period_micros = 0;
 
 void int_rtc_mark_isr(void)
 {
-  unsigned long m = decimicros();
+  unsigned long m = MICROS_FUNCTION();
   int_rtc_period_micros = m - int_rtc_micros;
   int_rtc_micros = m;
 }
 void ext_rtc_mark_isr(void)
 {
-  unsigned long m = decimicros();
+  unsigned long m = MICROS_FUNCTION();
   ext_rtc_period_micros = m - ext_rtc_micros;
   ext_rtc_micros = m;
 }
 void gps_mark_isr(void)
 {
-  unsigned long m = decimicros();
+  unsigned long m = MICROS_FUNCTION();
   gps_period_micros = m - gps_micros;
   gps_micros = m;
 }
