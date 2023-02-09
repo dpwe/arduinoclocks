@@ -68,6 +68,24 @@ const int ext_scl_pin = A5;
 hw_timer_t * decimicros_timer = NULL;
 #endif
 
+#ifdef ARDUINO_ARCH_RP2040
+#include "hardware/irq.h"
+#include "hardware/pwm.h"
+
+uint8_t timer_sliceNum = 0;
+
+volatile uint32_t timer_count = 0;
+volatile uint32_t timer_pwmTop = (1L << 16);
+
+void _on_pwm_wrap() {
+    // Clear the interrupt flag that brought us here
+    pwm_clear_irq(timer_sliceNum);
+    // Wind on the underlying counter.
+    timer_count += timer_pwmTop;
+}
+
+#endif
+
 void decimicros_setup() {
 #ifdef EPS32
   // After https://espressif-docs.readthedocs-hosted.com/projects/arduino-esp32/en/latest/api/timer.html
@@ -77,15 +95,44 @@ void decimicros_setup() {
 
   // Attach onTimer function to our timer.
   timerAttachInterrupt(timer, &onTimer, true);
-#endif
+#else // !ESP32
+#ifdef ARDUINO_ARCH_RP2040
+  // Use 16 bit PWM counter.
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_FREE_RUNNING);
+  pwm_config_set_clkdiv(&cfg, 12);  // 125 MHz clock, divide for ~10 MHz counts
+  pwm_init(timer_sliceNum, &cfg, false);
+  pwm_set_enabled(timer_sliceNum, true);
+  pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+
+  // Setup the wraparound interrupt.
+  // Mask our slice's IRQ output into the PWM block's single interrupt line,
+  // and register our interrupt handler
+  pwm_clear_irq(timer_sliceNum);
+  pwm_set_irq_enabled(timer_sliceNum, true);
+  irq_set_exclusive_handler(PWM_IRQ_WRAP, _on_pwm_wrap);
+  irq_set_enabled(PWM_IRQ_WRAP, true);
+
+#endif // ARDUINO_ARCH_RP2040
+#endif // !ESP32
 }
 
 unsigned long decimicros() {
 #ifdef ESP32
   return timerRead(decimicros_timer);
-#else
+#else // !ESP32
+#ifdef ARDUINO_ARCH_RP2040
+  uint32_t hi_part = timer_count;
+  uint16_t lo_part = pwm_get_counter(timer_sliceNum);
+  if (lo_part < 10000) {
+    // maybe it wrapped between reading hi an lo_part, re-read.
+    hi_part = timer_count;
+  }
+  return hi_part + lo_part;
+#else // !ARDUINO_ARCH_RP2040
   return 10L*micros();
-#endif
+#endif // !ARDUINO_ARCH_RP2040
+#endif // !ESP32
 }
 
 // =============================================================
@@ -102,19 +149,19 @@ volatile unsigned long gps_period_micros = 0;
 
 void int_rtc_mark_isr(void)
 {
-  unsigned long m = micros();
+  unsigned long m = decimicros();
   int_rtc_period_micros = m - int_rtc_micros;
   int_rtc_micros = m;
 }
 void ext_rtc_mark_isr(void)
 {
-  unsigned long m = micros();
+  unsigned long m = decimicros();
   ext_rtc_period_micros = m - ext_rtc_micros;
   ext_rtc_micros = m;
 }
 void gps_mark_isr(void)
 {
-  unsigned long m = micros();
+  unsigned long m = decimicros();
   gps_period_micros = m - gps_micros;
   gps_micros = m;
 }
