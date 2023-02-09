@@ -1333,6 +1333,8 @@ void setup() {
   Serial.println("temp sensor setup...");
   temperature_setup();
 
+  Serial.println("decimicros setup...");
+  decimicros_setup();
   Serial.println("interrupts setup...");
   setup_interrupts();
   Serial.println("Setup done.");
