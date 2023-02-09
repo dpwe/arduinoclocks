@@ -59,6 +59,35 @@ const int ext_scl_pin = A5;
 //  Bottom button:  Short: Decrease loading via Offset Register
 //                  Long: Sync DS3231 to time from GPS
 
+// ---------------------------
+// 10 MHz counter 
+// for 0.1 us resolution measurements
+// ---------------------------
+
+#ifdef ESP32
+hw_timer_t * decimicros_timer = NULL;
+#endif
+
+void decimicros_setup() {
+#ifdef EPS32
+  // After https://espressif-docs.readthedocs-hosted.com/projects/arduino-esp32/en/latest/api/timer.html
+  // Use 1st timer of 4 (counted from zero).
+  // Set 8 divider for prescaler to get 0.1us counts.
+  timer = timerBegin(/* timer */ 0, /* prescaler */ 8, /* count_direction_up */ true);
+
+  // Attach onTimer function to our timer.
+  timerAttachInterrupt(timer, &onTimer, true);
+#endif
+}
+
+unsigned long decimicros() {
+#ifdef ESP32
+  return timerRead(decimicros_timer);
+#else
+  return 10L*micros();
+#endif
+}
+
 // =============================================================
 // PPS change time recording.
 // =============================================================
