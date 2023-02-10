@@ -1157,8 +1157,7 @@ int timer_tenMHzInputPin = 19;  // Must be odd-numbered (PWM Chan B) pin.
 
 uint8_t timer_sliceNum = 0;
 
-//uint32_t timer_count_max = 10000000; // 10 million
-uint32_t timer_count_max = 9999999; // Trying to match to actual clock, ~0.07ppm slow
+uint32_t timer_count_max = 10000000; // 10 million
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
 volatile uint32_t timer_pwmTop = (1L << 16);
@@ -1672,6 +1671,7 @@ volatile uint8_t cursor = 0;  // Address of next register access.
 
 void receiveEvent(int howmany) {
   // Assume we got at least one data byte, and it's the cursor.
+  bool registers_written = false;
   bool seconds_modified = false;
   cursor = EXT_I2C.read();
 
@@ -1680,6 +1680,7 @@ void receiveEvent(int howmany) {
     uint8_t x = EXT_I2C.read();
     if (cursor < NUM_REGISTERS) {
       registers[cursor] = x;
+      registers_written = true;
       if (cursor == 0) {
         // We wrote the seconds register, reset the timer sync.
         seconds_modified = true;
@@ -1687,8 +1688,13 @@ void receiveEvent(int howmany) {
     }
     ++cursor;
   }
-  // Maybe act on the new register values.
-  ds3231_registers_updated(seconds_modified);
+  if (registers_written) {
+    // Maybe act on the new register values.
+    ds3231_registers_updated(seconds_modified);
+  } else {
+    // Just set the cursor, assume this is write_then_read, populate output buffer.
+    //EXT_I2C.write(registers + cursor, NUM_REGISTERS - cursor);
+  }
 }
 
 void requestEvent() {
