@@ -11,14 +11,14 @@
 
 #include <Wire.h>
 
-#include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
+#include <TimeLib.h>  // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
 
 // Wiring:
 //   GPS tx out                      -> D0 (for Serial1 RX)
 //   int DS3231 SQWV out (pale blue) -> A1 (GP27)
 //   GPS 1PPS out    (green)         -> A2 (GP28)
 //   ext DS3231 SQWV out             -> A3 (GP29)
-const int ledPin = 13; // On-board LED
+const int ledPin = 13;  // On-board LED
 
 // RP2040 Feather pins - default I2C
 // Default I2C ("Wire") is actually Wire1 on RP2040 Feather
@@ -38,10 +38,10 @@ const int ppsPin = 28;       // (A2) PPS output from GPS board
 const int ext_sqwPin = 29;   // (A3) SQWV output from external DS3231
 const int ext_sda_pin = 24;  // Same physical pins on Feather, but different names.
 const int ext_scl_pin = 25;
-#else 
-const int int_sqwPin = A1;   // (A1) SQWV output from Feather (internal) DS3231
-const int ppsPin = A2;       // (A2) PPS output from GPS board
-const int ext_sqwPin = A3;   // (A3) SQWV output from external DS3231
+#else
+const int int_sqwPin = A1;  // (A1) SQWV output from Feather (internal) DS3231
+const int ppsPin = A2;      // (A2) PPS output from GPS board
+const int ext_sqwPin = A3;  // (A3) SQWV output from external DS3231
 const int ext_sda_pin = A4;
 const int ext_scl_pin = A5;
 #endif
@@ -59,93 +59,6 @@ const int ext_scl_pin = A5;
 //  Bottom button:  Short: Decrease loading via Offset Register
 //                  Long: Sync DS3231 to time from GPS
 
-// ---------------------------
-// 10 MHz counter 
-// for 0.1 us resolution measurements
-// ---------------------------
-#define USE_DECIMICROS
-
-#ifdef USE_DECIMICROS
-#ifdef ESP32
-hw_timer_t * decimicros_timer = NULL;
-#endif
-
-#ifdef ARDUINO_ARCH_RP2040
-#include "hardware/irq.h"
-#include "hardware/pwm.h"
-
-uint8_t timer_sliceNum = 0;
-
-volatile uint32_t timer_count = 0;
-volatile uint32_t timer_pwmTop = (1L << 16);
-
-void _on_pwm_wrap() {
-    // Clear the interrupt flag that brought us here
-    pwm_clear_irq(timer_sliceNum);
-    // Wind on the underlying counter.
-    timer_count += timer_pwmTop;
-}
-
-#endif
-
-void decimicros_setup() {
-#ifdef ESP32
-  // After https://espressif-docs.readthedocs-hosted.com/projects/arduino-esp32/en/latest/api/timer.html
-  // Use 1st timer of 4 (counted from zero).
-  // Set 8 divider for prescaler to get 0.1us counts.
-  decimicros_timer = timerBegin(/* timer */ 1, /* prescaler */ 8, /* count_direction_up */ true);
-  // Unfortunately, Arduino-API timer calls seem to be disasterous, specifically calling timerRead in the PPS interrupts.
-
-#else // !ESP32
-#ifdef ARDUINO_ARCH_RP2040
-  // Use 16 bit PWM counter.
-  pwm_config cfg = pwm_get_default_config();
-  pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_FREE_RUNNING);
-  pwm_config_set_clkdiv(&cfg, 12);  // 125 MHz clock, divide for ~10 MHz counts
-  pwm_init(timer_sliceNum, &cfg, false);
-  pwm_set_enabled(timer_sliceNum, true);
-  pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
-
-  // Setup the wraparound interrupt.
-  // Mask our slice's IRQ output into the PWM block's single interrupt line,
-  // and register our interrupt handler
-  pwm_clear_irq(timer_sliceNum);
-  pwm_set_irq_enabled(timer_sliceNum, true);
-  irq_set_exclusive_handler(PWM_IRQ_WRAP, _on_pwm_wrap);
-  irq_set_enabled(PWM_IRQ_WRAP, true);
-
-#endif // ARDUINO_ARCH_RP2040
-#endif // !ESP32
-}
-
-unsigned long decimicros() {
-#ifdef ESP32
-  return timerRead(decimicros_timer);
-#else // !ESP32
-#ifdef ARDUINO_ARCH_RP2040
-  uint32_t hi_part = timer_count;
-  uint16_t lo_part = pwm_get_counter(timer_sliceNum);
-  if (lo_part < 10000) {
-    // maybe it wrapped between reading hi an lo_part, re-read.
-    hi_part = timer_count;
-  }
-  return hi_part + lo_part;
-#else // !ARDUINO_ARCH_RP2040
-  return 10L*micros();
-#endif // !ARDUINO_ARCH_RP2040
-#endif // !ESP32
-}
-
-#define MICROS_FUNCTION micros
-
-#else // !USE_DECIMICROS
-
-void decimicros_setup() {
-}
-
-#define decimicros micros
-
-#endif
 
 // =============================================================
 // PPS change time recording.
@@ -159,20 +72,19 @@ volatile unsigned long int_rtc_period_micros = 0;
 volatile unsigned long ext_rtc_period_micros = 0;
 volatile unsigned long gps_period_micros = 0;
 
-void int_rtc_mark_isr(void)
-{
+#define MICROS_FUNCTION micros
+
+void int_rtc_mark_isr(void) {
   unsigned long m = MICROS_FUNCTION();
   int_rtc_period_micros = m - int_rtc_micros;
   int_rtc_micros = m;
 }
-void ext_rtc_mark_isr(void)
-{
+void ext_rtc_mark_isr(void) {
   unsigned long m = MICROS_FUNCTION();
   ext_rtc_period_micros = m - ext_rtc_micros;
   ext_rtc_micros = m;
 }
-void gps_mark_isr(void)
-{
+void gps_mark_isr(void) {
   unsigned long m = MICROS_FUNCTION();
   gps_period_micros = m - gps_micros;
   gps_micros = m;
@@ -187,7 +99,7 @@ void setup_interrupts() {
   // GPS mark is on rising edge.
   pinMode(ppsPin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
-} 
+}
 
 // ======================================================
 // Base Clock class tracks unixtime rel to millis/micros.
@@ -199,15 +111,15 @@ void setup_interrupts() {
 #define CLOCK_SYNC_INTERVAL_SECS 30
 
 class Clock {
- public:
+public:
   const char *name_ = 0;
   // base_unixtime_ corresponds to base_micros_.
   time_t base_unixtime_ = 0;
   unsigned long base_micros_ = 0;
   bool synced_ = false;
-  // Calibrated system ticks per Clock's second.  
+  // Calibrated system ticks per Clock's second.
   // This is stored in tenths of microseconds to allow fractional microseconds.
-  long decimicros_per_sec_ = 10000000;   // 10^7
+  long decimicros_per_sec_ = 10000000;  // 10^7
   long nanoseconds_error_per_sec_ = 0;
   time_t measurement_period_secs_ = 0;
   bool ppm_tracking_ = false;  // is nanoseconds_error meaningful?
@@ -224,15 +136,15 @@ class Clock {
   int sync_count_ = 0;
   int min_sync_count_ = 0;
 
-  Clock(const char *name, int min_sync_count=MIN_SYNC_COUNT) 
+  Clock(const char *name, int min_sync_count = MIN_SYNC_COUNT)
     : name_(name), min_sync_count_(min_sync_count) {}
 
-  long skew_micros(Clock& ref) {
+  long skew_micros(Clock &ref) {
     // Report the delay in *system micros* between ref clock reaching a time and this clock reaching the same time.
     // A positive skew means this clock is behind the ref clock.
     // This only compares the last sync times of each clock, not actual "current" time.
     // If this clock is slow relative to ref clock, skew_micros will increas with time.
-    // Strictly, value depends on whether we're evaluating it at this.base_unixtime_, or ref.base_unixtime_.  
+    // Strictly, value depends on whether we're evaluating it at this.base_unixtime_, or ref.base_unixtime_.
     // Use ref, because ref.micros_per_sec is less likely to be wildly off.
     long micros_per_sec = (ref.decimicros_per_sec_ + 5) / 10;  // Apply rounding.
     long skew_us = ((long)(base_micros_ - ref.base_micros_)) - micros_per_sec * ((long)(base_unixtime_ - ref.base_unixtime_));
@@ -246,7 +158,7 @@ class Clock {
     return base_unixtime_ + seconds_since_base;
   }
 
-  void sync(time_t sync_unixtime, unsigned long sync_micros=0) {
+  void sync(time_t sync_unixtime, unsigned long sync_micros = 0) {
     // Sync the clock to sync_unixtime exactly now (or at sync_micros).
     ++sync_count_;
     if (sync_micros == 0) {
@@ -272,8 +184,7 @@ class Clock {
         // Hopefully the queue will ensure it's never more than ~4 minutes.
         int delta_seconds = sync_unixtime - older_sync_unixtime_;
         if (delta_seconds > 0 && delta_seconds < 400) {
-          decimicros_per_sec_ = (10 * (sync_micros - older_sync_micros_)) / 
-                                delta_seconds;
+          decimicros_per_sec_ = (10 * (sync_micros - older_sync_micros_)) / delta_seconds;
         }
       }
     }
@@ -344,15 +255,17 @@ Clock *sys_clock = &int_rtc_clock;
 // Give up on RTC if no sync in this long.
 #define MIN_RTC_SYNC_GAP 5
 
-static uint8_t bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
+static uint8_t bcd2bin(uint8_t val) {
+  return val - 6 * (val >> 4);
+}
 
 class DS3231_holder {
- public:
- 
+public:
+
   RTC_DS3231 rtc;
   boolean have_rtc = false;
   TwoWire *pwire = NULL;
-  int sqwPin = 0; 
+  int sqwPin = 0;
   volatile unsigned long *prtc_micros = NULL;
   unsigned long last_rtc_micros = 0;
   Clock *pclock = NULL;
@@ -360,8 +273,8 @@ class DS3231_holder {
   int rtc_aging = 0;
   int rtc_temperature_centidegs = 0;
 
-  DS3231_holder(int pin, volatile unsigned long *pmicros, Clock *p_clock) 
-    : sqwPin(pin), prtc_micros(pmicros), pclock(p_clock) { 
+  DS3231_holder(int pin, volatile unsigned long *pmicros, Clock *p_clock)
+    : sqwPin(pin), prtc_micros(pmicros), pclock(p_clock) {
   }
 
   void readAllRegisters(byte *registers, int num_bytes = 19) {
@@ -369,13 +282,13 @@ class DS3231_holder {
     if (num_bytes > 19) num_bytes = 19;
     pwire->beginTransmission(CLOCK_ADDRESS);
     pwire->write(0x0);
-      pwire->endTransmission();
-      pwire->requestFrom(CLOCK_ADDRESS, num_bytes);
-    for(int i = 0; i < num_bytes; ++i) {
-       registers[i] = pwire->read();
+    pwire->endTransmission();
+    pwire->requestFrom(CLOCK_ADDRESS, num_bytes);
+    for (int i = 0; i < num_bytes; ++i) {
+      registers[i] = pwire->read();
     }
   }
-  
+
   int getTemperatureCentidegs(void) {
     // Read temperature register
     pwire->beginTransmission(CLOCK_ADDRESS);
@@ -421,7 +334,7 @@ class DS3231_holder {
   }
 
   void setAgingOffset(int offset) {
-    // Write the aging register. 
+    // Write the aging register.
     // It's a signed 8 bit value, -128..127
     // Crystal *slows* by approx 0.1 ppm per unit.
     pwire->beginTransmission(CLOCK_ADDRESS);
@@ -435,10 +348,10 @@ class DS3231_holder {
     last_rtc_micros = *prtc_micros;
     pclock->sync(rtc.now().unixtime(), last_rtc_micros);
   }
-  
+
   bool pending_interrupt(void) {
     unsigned long rtc_micros = *prtc_micros;
-    if (rtc_micros == last_rtc_micros)  return false;
+    if (rtc_micros == last_rtc_micros) return false;
     last_rtc_micros = rtc_micros;
     return true;
   }
@@ -450,8 +363,8 @@ class DS3231_holder {
       Serial.flush();
       abort();
     }
-    rtc.writeSqwPinMode(DS3231_SquareWave1Hz); // Place SQW pin into 1 Hz mode
-    pinMode(sqwPin, INPUT_PULLUP); // Set alarm pin as pullup
+    rtc.writeSqwPinMode(DS3231_SquareWave1Hz);  // Place SQW pin into 1 Hz mode
+    pinMode(sqwPin, INPUT_PULLUP);              // Set alarm pin as pullup
     // Sync even without interrupts
     *prtc_micros = micros();
     sync_clock_to_rtc();
@@ -487,10 +400,10 @@ class DS3231_holder *active_rtc = &ext_rtc;
 class DS3231_holder *alt_rtc = &int_rtc;
 
 
-#include <Timezone.h>       // https://github.com/JChristensen/Timezone
+#include <Timezone.h>  // https://github.com/JChristensen/Timezone
 // US Eastern Time Zone (New York, Detroit)
-TimeChangeRule myDST = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
-TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
+TimeChangeRule myDST = { "EDT", Second, Sun, Mar, 2, -240 };  //Daylight time = UTC - 4 hours
+TimeChangeRule mySTD = { "EST", First, Sun, Nov, 2, -300 };   //Standard time = UTC - 5 hours
 Timezone myTZ(myDST, mySTD);
 
 
@@ -498,14 +411,14 @@ Timezone myTZ(myDST, mySTD);
 // Track GPS times.
 // ======================================================
 
-#include <TinyGPS.h>       // http://arduiniana.org/libraries/TinyGPS/
+#include <TinyGPS.h>  // http://arduiniana.org/libraries/TinyGPS/
 
 // GPS talks via secondary UART interface.  Default on RP2040, needs init on ESP32
-#define SerialGPS Serial1 
+#define SerialGPS Serial1
 
 TinyGPS gps;
 
-time_t gps_now(class TinyGPS& gps) {
+time_t gps_now(class TinyGPS &gps) {
   tmElements_t tm;
   unsigned long date, time, age_millis;
   gps.get_datetime(&date, &time, &age_millis);
@@ -529,7 +442,7 @@ time_t gps_now(class TinyGPS& gps) {
   return makeTime(tm);
 }
 
-bool gps_time_valid(class TinyGPS& gps) {
+bool gps_time_valid(class TinyGPS &gps) {
   // It's only valid if it was updated within the past second.
   unsigned long time, age_millis;
   gps.get_datetime(0, &time, &age_millis);
@@ -539,7 +452,7 @@ bool gps_time_valid(class TinyGPS& gps) {
 unsigned long last_gps_micros = 0;
 
 bool pending_GPS_interrupt(void) {
-  if (gps_micros == last_gps_micros)  return false;
+  if (gps_micros == last_gps_micros) return false;
   last_gps_micros = gps_micros;
   return true;
 }
@@ -559,7 +472,7 @@ void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
   SerialGPS.begin(9600);
 #else
-  SerialGPS.begin(9600, SERIAL_8N1, /* rxPin= */2, /* txPin= */1);
+  SerialGPS.begin(9600, SERIAL_8N1, /* rxPin= */ 2, /* txPin= */ 1);
 #endif
 }
 
@@ -569,11 +482,11 @@ void update_GPS_serial(void) {
   }
 }
 
-DS3231_holder* request_sync_RTC = NULL;
+DS3231_holder *request_sync_RTC = NULL;
 bool request_sync_output = false;
 
 void setup_GPS(void) {
-    pinMode(ppsPin, INPUT_PULLUP); // Set alarm pin as pullup
+  pinMode(ppsPin, INPUT_PULLUP);  // Set alarm pin as pullup
 }
 
 void update_GPS(void) {
@@ -608,8 +521,7 @@ void update_GPS(void) {
 // Time display
 // ======================================================
 
-char *sprint_int(char *s, int n, int decimal_place=0)
-{ // Print a signed int as may places as needed. 
+char *sprint_int(char *s, int n, int decimal_place = 0) {  // Print a signed int as may places as needed.
   // returns next char* to write to string.
   // If decimal place > 0, assumed passed int is value * 10**decimal_place
   // and print a decimal place.
@@ -618,7 +530,7 @@ char *sprint_int(char *s, int n, int decimal_place=0)
     n = -n;
   }
   if (n > 9 || decimal_place > 0) {
-     s = sprint_int(s, n / 10, decimal_place - 1);
+    s = sprint_int(s, n / 10, decimal_place - 1);
   }
   if (decimal_place == 1) {
     *s++ = '.';
@@ -627,8 +539,7 @@ char *sprint_int(char *s, int n, int decimal_place=0)
   return s;
 }
 
-char *sprint_int2(char *s, int n)
-{  // Always 2 digits, assume n nonnegative, < 99.
+char *sprint_int2(char *s, int n) {  // Always 2 digits, assume n nonnegative, < 99.
   *s++ = '0' + (n / 10);
   *s++ = '0' + (n % 10);
   return s;
@@ -652,8 +563,7 @@ char *sprint_interval(char *s, int secs) {
   return s;
 }
 
-char *sprint_unixtime(char *s, time_t t, bool show_date=false)
-{  // Returns full terminated string
+char *sprint_unixtime(char *s, time_t t, bool show_date = false) {  // Returns full terminated string
   char *entry_s = s;
   // s must provide 20 bytes, or 9 if just time.
   tmElements_t tm;
@@ -703,8 +613,7 @@ void serial_print_unixtime(time_t t) {
   Serial.print(s);
 }
 
-char *sprint_clock_comparison(char *s, class Clock& clock, class Clock& ref_clock)
-{  // Returns full terminated string
+char *sprint_clock_comparison(char *s, class Clock &clock, class Clock &ref_clock) {  // Returns full terminated string
   char *entry_s = s;
   // Report skew in ms with 1 dp.
   s = sprint_int(s, clock.skew_micros(ref_clock) / 100, /* dp */ 1);
@@ -742,7 +651,7 @@ char *sprint_rtc_info(char *s, const class DS3231_holder &rtc) {
   }
   strcpy(s, "t=");
   s += strlen(s);
-  s = sprint_int(s, rtc.rtc_temperature_centidegs/10, 1);
+  s = sprint_int(s, rtc.rtc_temperature_centidegs / 10, 1);
   strcpy(s, " a=");
   s += strlen(s);
   s = sprint_int(s, rtc.rtc_aging);
@@ -751,20 +660,20 @@ char *sprint_rtc_info(char *s, const class DS3231_holder &rtc) {
   int h, m;
   rtc.getAlarm2(&h, &m);
   s = sprint_int2(s, h);
-  *s++ = ':';  
+  *s++ = ':';
   s = sprint_int2(s, m);
-  *s++ = ' ';   // Trailing space to overwrite cruft.
+  *s++ = ' ';  // Trailing space to overwrite cruft.
   *s++ = 0;
   return entry_s;
 }
 
-void serial_print_clock_comparison(class Clock& clock, class Clock& ref_clock) {
+void serial_print_clock_comparison(class Clock &clock, class Clock &ref_clock) {
   char s[64];
   sprint_clock_comparison(s, clock, ref_clock);
   Serial.print(s);
 }
 
-void serial_clock_debug(class Clock* pclock) {
+void serial_clock_debug(class Clock *pclock) {
   char s[9];
   Serial.print(" ");
   Serial.print(pclock->name_);
@@ -790,7 +699,7 @@ void serial_print_registers(void) {
   byte registers[NUM_REGISTERS];
   active_rtc->readAllRegisters(registers, NUM_REGISTERS);
   for (int i = 0; i < NUM_REGISTERS; ++i) {
-    if (registers[i] < 16)  Serial.print("0");
+    if (registers[i] < 16) Serial.print("0");
     Serial.print(registers[i], HEX);
     Serial.print(" ");
   }
@@ -816,12 +725,12 @@ void temperature_setup(void) {
 
 int temperature_get(void) {
   // Return current temperature in quarter-Cs.
-  // Temp sensor V_be is nominally 0.706 v at 27 degC 
+  // Temp sensor V_be is nominally 0.706 v at 27 degC
   // with a slope of -1.721 mV/deg.
   // temp_quarter-Cs = 4 * (27 - ((3.3 * adc_read() / 4096) - 0.706) / 0.001721)
   //                 = 4 * (27 - (0.468 * adc_read() - 410.22))
   //                 = 4 * (437.22 - 0.468 * adc_read())
-  //                 = 
+  //                 =
   //  = 108 - (13.2 / 4096 * adc_read() * 581 + 4*410
   //  = 1748.9 - 1.872 * adc_read()
   //  =/= 1749 - (15/8) * adc_read()
@@ -831,20 +740,20 @@ int temperature_get(void) {
   return 1749 - ((15 * adc_read()) >> 3);
 }
 
-#else // !RP2040
+#else  // !RP2040
 
 #ifdef ESP32
 // ESP32 onboard temp sensor
-// See 
+// See
 // https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/temp_sensor.html
 
 //#include "driver/temperature_sensor.h"
 
 void temperature_setup(void) {
-    //temperature_sensor_handle_t temp_sensor = NULL;
-    //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
-    //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
-    //temperature_sensor_enable(temp_sensor);
+  //temperature_sensor_handle_t temp_sensor = NULL;
+  //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+  //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
+  //temperature_sensor_enable(temp_sensor);
 }
 
 // Copied from esp32.../esp32-hal.h, undocumented??  Returns C.
@@ -852,13 +761,13 @@ float temperatureRead();
 
 int temperature_get(void) {
   // Return current temperature in quarter-Cs.
-    float tsens_value;
-    //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
-    tsens_value = temperatureRead();
-    return (int)(round( 4 * tsens_value));
+  float tsens_value;
+  //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
+  tsens_value = temperatureRead();
+  return (int)(round(4 * tsens_value));
 }
-    
-#else // !ESP32
+
+#else  // !ESP32
 
 void temperature_setup(void) {
   // nothing.
@@ -867,7 +776,7 @@ void temperature_setup(void) {
 int temperature_get(void) {
   // Return current temperature in quarter-Cs.
   // dummy.
-  return (4* 25);
+  return (4 * 25);
 }
 
 #endif  // !ESP32
@@ -884,90 +793,90 @@ int temperature_get(void) {
 #include <Adafruit_GFX.h>
 
 #ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
-  #define DISPLAY_SH1107  // 128x64 mono OLED in Feather stack
-  // Wire1 is the internal I2C on Feather RP2040
-  #define WIRE_INTERNAL Wire1
-  #define WIRE_EXTERNAL Wire
+#define DISPLAY_SH1107      // 128x64 mono OLED in Feather stack
+// Wire1 is the internal I2C on Feather RP2040
+#define WIRE_INTERNAL Wire1
+#define WIRE_EXTERNAL Wire
 #else
-  #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
-  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
-  #define WIRE_INTERNAL Wire
-  #define WIRE_EXTERNAL Wire1
+#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+//#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+#define WIRE_INTERNAL Wire
+#define WIRE_EXTERNAL Wire1
 #endif
 
 #ifdef DISPLAY_SSD1351
-  // Arduino - Expect SQWV input on D3
-  const uint8_t sqwvPin = 3;
+// Arduino - Expect SQWV input on D3
+const uint8_t sqwvPin = 3;
 
-  #include <Adafruit_SSD1351.h>
-  // Screen dimensions
-  #define SCREEN_WIDTH  128
-  #define SCREEN_HEIGHT 128 // Change this to 96 for 1.27" OLED.
-  #define SIZE_1X
+#include <Adafruit_SSD1351.h>
+// Screen dimensions
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
+#define SIZE_1X
 
-  // Hardware SPI pins 
-  // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be 
-  // an output. 
-  #define DC_PIN   4
-  #define CS_PIN   5
-  #define RST_PIN  6
-  Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
+// Hardware SPI pins
+// (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
+// an output.
+#define DC_PIN 4
+#define CS_PIN 5
+#define RST_PIN 6
+Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
 
-  // Color definitions
-  #define BLACK           0x0000
-  #define BLUE            0x001F
-  #define RED             0xF800
-  #define GREEN           0x07E0
-  #define CYAN            0x07FF
-  #define MAGENTA         0xF81F
-  #define YELLOW          0xFFE0  
-  #define WHITE           0xFFFF
+// Color definitions
+#define BLACK 0x0000
+#define BLUE 0x001F
+#define RED 0xF800
+#define GREEN 0x07E0
+#define CYAN 0x07FF
+#define MAGENTA 0xF81F
+#define YELLOW 0xFFE0
+#define WHITE 0xFFFF
 #endif
 
 #ifdef DISPLAY_ST7789
-  // ESP32-S2/3 TFT
-  
-  #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+// ESP32-S2/3 TFT
 
-  #define SCREEN_WIDTH  240
-  #define SCREEN_HEIGHT 135 // Change this to 96 for 1.27" OLED.
-  #define SIZE_2X  // All text double-size
+#include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
 
-  // Use dedicated hardware SPI pins
-  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+#define SCREEN_WIDTH 240
+#define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
+#define SIZE_2X            // All text double-size
 
-  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
+// Use dedicated hardware SPI pins
+Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-  #define WHITE ST77XX_WHITE
-  #define BLACK ST77XX_BLACK
-  #define BLUE  ST77XX_BLUE
-  #define RED   ST77XX_RED
-  #define GREEN ST77XX_GREEN
-  #define CYAN  ST77XX_CYAN
-  #define MAGENTA ST77XX_MAGENTA
-  #define YELLOW  ST77XX_YELLOW 
+const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
+
+#define WHITE ST77XX_WHITE
+#define BLACK ST77XX_BLACK
+#define BLUE ST77XX_BLUE
+#define RED ST77XX_RED
+#define GREEN ST77XX_GREEN
+#define CYAN ST77XX_CYAN
+#define MAGENTA ST77XX_MAGENTA
+#define YELLOW ST77XX_YELLOW
 #endif
 
 #ifdef DISPLAY_SH1107
-  // Feather (RP2040) stack
+// Feather (RP2040) stack
 
-  #include <Adafruit_SH110X.h>
-  
-  #define SCREEN_WIDTH  128
-  #define SCREEN_HEIGHT 64
-  #define SIZE_1X
+#include <Adafruit_SH110X.h>
 
-  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &WIRE_INTERNAL);
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define SIZE_1X
 
-  // Monochrome, all colors are white
-  #define WHITE SH110X_WHITE
-  #define BLACK SH110X_BLACK
-  #define BLUE  WHITE
-  #define RED   WHITE
-  #define GREEN WHITE
-  #define CYAN  WHITE
-  #define MAGENTA WHITE
-  #define YELLOW  WHITE 
+Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &WIRE_INTERNAL);
+
+// Monochrome, all colors are white
+#define WHITE SH110X_WHITE
+#define BLACK SH110X_BLACK
+#define BLUE WHITE
+#define RED WHITE
+#define GREEN WHITE
+#define CYAN WHITE
+#define MAGENTA WHITE
+#define YELLOW WHITE
 
 #endif
 
@@ -1031,12 +940,12 @@ void setup_display(void) {
   pinMode(TFT_BACKLITE, OUTPUT);
   analogWrite(TFT_BACKLITE, 128);
 
-  display.init(135, 240); // Init ST7789 240x135
+  display.init(135, 240);  // Init ST7789 240x135
   display.setRotation(3);
 #endif
 #ifdef DISPLAY_SH1107
-  display.begin(0x3C, true); // Address 0x3C default
-  display.display();  // Splashscreen
+  display.begin(0x3C, true);  // Address 0x3C default
+  display.display();          // Splashscreen
   delay(500);
   display.clearDisplay();
   display.display();
@@ -1045,27 +954,27 @@ void setup_display(void) {
 
   display.fillScreen(BLACK);
 
-  // text display 
+  // text display
   display.setTextSize(1);
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,0);
+  display.setCursor(0, 0);
   display.print("synchronizer_feather");
 
   display_on = true;
 }
 
 #ifdef SIZE_1X
-  // 1x size
-  #define SMALL_SIZE 1
-  #define LARGE_SIZE 2
-  #define ROW_H 8
-  #define CHAR_W 6
+// 1x size
+#define SMALL_SIZE 1
+#define LARGE_SIZE 2
+#define ROW_H 8
+#define CHAR_W 6
 #else
-  // 2x size
-  #define SMALL_SIZE 2
-  #define LARGE_SIZE 4
-  #define ROW_H 16
-  #define CHAR_W 12
+// 2x size
+#define SMALL_SIZE 2
+#define LARGE_SIZE 4
+#define ROW_H 16
+#define CHAR_W 12
 #endif
 
 void update_display(class DS3231_holder *prtc) {
@@ -1102,14 +1011,14 @@ void update_display(class DS3231_holder *prtc) {
 // =========== Button management ==============
 // ======================================================
 
-#define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
+#define NUM_BUTTONS 3       // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
 #ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
-int button_pins[NUM_BUTTONS] = {9, 8, 7};
+int button_pins[NUM_BUTTONS] = { 9, 8, 7 };
 #else
-int button_pins[NUM_BUTTONS] = {9, 6, 5};
+int button_pins[NUM_BUTTONS] = { 9, 6, 5 };
 #endif
-int button_state[NUM_BUTTONS] = {0, 0, 0};
-unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
+int button_state[NUM_BUTTONS] = { 0, 0, 0 };
+unsigned long button_last_change_time[NUM_BUTTONS] = { 0, 0, 0 };
 // For distinguishing short/long press
 int button_down_time = 0;
 
@@ -1125,7 +1034,7 @@ void buttons_setup(time_t t) {
 
 void swap_rtcs(void) {
   // Swap RTCs
-  class DS3231_holder* tmp = active_rtc;
+  class DS3231_holder *tmp = active_rtc;
   active_rtc = alt_rtc;
   alt_rtc = tmp;
   update_display(active_rtc);
@@ -1167,7 +1076,7 @@ void buttons_update(time_t t) {
       wake_up_display();
       return;
     }
-    switch(button) {
+    switch (button) {
       case 0:
         if (long_press) {
           sleep_display();
@@ -1223,7 +1132,7 @@ void cmd_update(time_t t) {
       cmd_buffer[cmd_len] = '\0';
       if (cmd_len > 0) {
         byte cmd0 = cmd_buffer[0];
-        if (cmd0 >= 'a' && cmd0 <= 'z')  cmd0 -= ('a' - 'A');
+        if (cmd0 >= 'a' && cmd0 <= 'z') cmd0 -= ('a' - 'A');
         switch (cmd0) {
           case '?':
             Serial.println("Y    - sYnc DS3231 to GPS");
@@ -1286,7 +1195,7 @@ bool serial_available = false;
 
 #define MAXWAIT_SERIAL 200  // 200 = 2 seconds.
 
-void open_serial(int baudrate=9600) {
+void open_serial(int baudrate = 9600) {
   Serial.begin(baudrate);
   // Wait for Serial port to open
   int i = 0;
@@ -1306,7 +1215,7 @@ void setup() {
   digitalWrite(ledPin, HIGH);
 
   open_serial();
-  
+
   Serial.print("synchronizer_feather ");
   Serial.print(__DATE__);
   Serial.print(" ");
@@ -1345,8 +1254,6 @@ void setup() {
   Serial.println("temp sensor setup...");
   temperature_setup();
 
-  Serial.println("decimicros setup...");
-  decimicros_setup();
   Serial.println("interrupts setup...");
   setup_interrupts();
   Serial.println("Setup done.");
@@ -1370,8 +1277,7 @@ void loop() {
   int_rtc.update(sys_secs);
   ext_rtc.update(sys_secs);
   update_GPS();
-  if(gps_clock.synced_ && 
-    (!gps_has_been_live || (((long)gps_clock.base_unixtime_) - sys_secs) < GPS_TIMEOUT_SECS)) {
+  if (gps_clock.synced_ && (!gps_has_been_live || (((long)gps_clock.base_unixtime_) - sys_secs) < GPS_TIMEOUT_SECS)) {
     // GPS is sync'ing, and it has been sync'd recently, or it's the first time we've seen it sync'd
     // (in which case the difference from sys_secs may be immaterial).
     sys_clock = &gps_clock;
@@ -1397,14 +1303,23 @@ void loop() {
 
       Serial.print(int_rtc.rtc_temperature_centidegs / 100.f);
       Serial.print(", ");
-      Serial.print((long)(int_rtc_micros - gps_micros));
+      if (gps_micros < int_rtc_micros) {
+        Serial.print((long)(int_rtc_micros - gps_micros));
+      } else {
+        // report micros since preceding gps tick.
+        Serial.print((long)(int_rtc_micros - (gps_micros - gps_period_micros)));
+      }
       Serial.print(", ");
       Serial.print(int_rtc_period_micros);
       Serial.print(", ");
 
       Serial.print(ext_rtc.rtc_temperature_centidegs / 100.f);
       Serial.print(", ");
-      Serial.print((long)(ext_rtc_micros - gps_micros));
+      if (gps_micros < ext_rtc_micros) {
+        Serial.print((long)(ext_rtc_micros - gps_micros));
+      } else {
+        Serial.print((long)(ext_rtc_micros - (gps_micros - gps_period_micros)));
+      }
       Serial.print(", ");
       Serial.print(ext_rtc_period_micros);
       Serial.println();
@@ -1423,4 +1338,5 @@ void loop() {
     update_display(active_rtc);
   }
   sleep_update();
+  delay(20);
 }
