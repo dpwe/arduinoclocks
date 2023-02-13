@@ -41,6 +41,8 @@ Of paramount interest is the point at which the error stops reducing as the aver
 
 The OCXO, however, continues benefitting from longer averaging intervals out to around 5000 seconds (90 mins), thereby reaching a deviation of close to 10^(-8.7) = 2 ppb, which is fantastic -- less than 0.1 sec error in a year.  However, it looks like it might be going up again after that, reflecting longer-term drift.  We’ll have to log data for more than a few days to estimate its longer-term stability.
 
-[^1]: I actually expected the decline to have a slope of -0.5, that is averaging over 100 time the interval should reduce the deviation by a factor of 10, since its the variances that sum as we combine intervals, so the deviations should grow as sqrt(N), which would lead to a reduction in error by a factor of 1/sqrt(N) when divided by the N-times larger sum.  Not sure what's happening here, the slope looks a lot like -1.0.
+---
+
+[^1]: When averaging noisy values, we usually expect proportional error to decline with the *square root* of sample size, because it's the variances of uncorrelated errors that sum up.  This would appear as a slope of -0.5 in the Allan deviation plot.  However, in this case the errors are *correlated* -- if one sample is particularly late, we expect the next one to be early, because the underlying clock event sequence has not been delayed.  Thus, the absolute error is approximately constant (at around 1 µs) as the interval increases, making the relative error inversely proportional to the measurement duration, leading to a slope of -1.0 in the plot.  This holds only for the range of shorter intervals before long-term drift becomes significant.
 
 
