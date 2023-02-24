@@ -1,4 +1,4 @@
-### [ClockBlog](index.html)
+### [dpwe](https://github.com/dpwe) [ClockBlog](https://dpwe.github.io/arduinoclocks/)
 
 ## 2022-03-20 
 # GPS-RTC Synchronizer

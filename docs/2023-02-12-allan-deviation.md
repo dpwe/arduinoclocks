@@ -1,4 +1,4 @@
-### [dpwe](https://github.com/dpwe) [ClockBlog](index.html)
+### [dpwe](https://github.com/dpwe) [ClockBlog](https://dpwe.github.io/arduinoclocks/)
 
 ## 2023-02-12
 # Comparing clock stability with Allan Deviation

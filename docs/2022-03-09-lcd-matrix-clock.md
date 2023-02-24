@@ -1,4 +1,4 @@
-### [ClockBlog](index.html)
+### [dpwe](https://github.com/dpwe) [ClockBlog](https://dpwe.github.io/arduinoclocks/)
 
 ## 2022-03-09 
 # KS0108 LCD Matrix Clock

@@ -1,4 +1,4 @@
-### [ClockBlog](index.md)
+### [dpwe](https://github.com/dpwe) [ClockBlog](https://dpwe.github.io/arduinoclocks/)
 
 ## 2022-07-21 
 # Adding a Temperature-Compensated Crystal Oscillator to a Consumer Clock Radio
