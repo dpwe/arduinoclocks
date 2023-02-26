@@ -54,15 +54,15 @@ void gpio_transition() {
     gpio_acknowledge_irq(sqwPin, IO_IRQ_BANK0);
   }
   if (gpio_get_irq_event_mask(ppsPin)) {
-    rtc_micros = now_micros;
+    gps_micros = now_micros;
     gpio_acknowledge_irq(ppsPin, IO_IRQ_BANK0);
   }
 }
 
 void setup_interrupts(void) {
     gpio_init(scopePin);gpio_set_dir(scopePin, GPIO_OUT); gpio_put(scopePin, 1);
-    gpio_init(sqwPin); gpio_set_dir(sqwPin, GPIO_IN);
-    gpio_init(ppsPin); gpio_set_dir(ppsPin, GPIO_IN);
+    //gpio_init(sqwPin); gpio_set_dir(sqwPin, GPIO_IN);
+    //gpio_init(ppsPin); gpio_set_dir(ppsPin, GPIO_IN);
     irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
     // RTC SQW pin samples on fall.
     gpio_set_irq_enabled(sqwPin, GPIO_IRQ_EDGE_FALL, true);
@@ -329,7 +329,9 @@ void setup_GPS_serial(void) {
 
 void update_GPS_serial(void) {
   while (SerialGPS.available()) {
-    gps.encode(SerialGPS.read());
+    char c = SerialGPS.read();
+    //Serial.print(c);
+    gps.encode(c);
   }
 }
 
