@@ -35,31 +35,41 @@ const int sqwPin = 14; // The number of the pin for monitor alarm status on DS32
 const int ppsPin = 15; // PPS output from GPS board
 
 const int ledPin = 25; // On-board LED on Pico
+const int scopePin = 16; // Output to scope
 
 // UI:
 //  Top button:     Sync DS3231 to time from GPS
 //  Middle button:  Emit Z command od Serial TX
 //  Bottom button:  (Cycle display?)
 
-
 volatile unsigned long rtc_micros = 0;
 volatile unsigned long gps_micros = 0;
 
-void rtc_mark_isr(void)
-{
-  rtc_micros = micros();
-}
-void gps_mark_isr(void)
-{
-  gps_micros = micros();
+void gpio_transition() {
+  gpio_put(scopePin, 0);
+  unsigned long now_micros = timer_hw->timelr;
+
+  if (gpio_get_irq_event_mask(sqwPin)) {
+    rtc_micros = now_micros;
+    gpio_acknowledge_irq(sqwPin, IO_IRQ_BANK0);
+  }
+  if (gpio_get_irq_event_mask(ppsPin)) {
+    rtc_micros = now_micros;
+    gpio_acknowledge_irq(ppsPin, IO_IRQ_BANK0);
+  }
 }
 
-void setup_interrupts() {
-  // DS3231 is on falling edge.
-  attachInterrupt(digitalPinToInterrupt(sqwPin), rtc_mark_isr, FALLING);
-  // GPS mark is on rising edge.
-  attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
-} 
+void setup_interrupts(void) {
+    gpio_init(scopePin);gpio_set_dir(scopePin, GPIO_OUT); gpio_put(scopePin, 1);
+    gpio_init(sqwPin); gpio_set_dir(sqwPin, GPIO_IN);
+    gpio_init(ppsPin); gpio_set_dir(ppsPin, GPIO_IN);
+    irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
+    // RTC SQW pin samples on fall.
+    gpio_set_irq_enabled(sqwPin, GPIO_IRQ_EDGE_FALL, true);
+    // GPS PPS pin samples on rise.
+    gpio_set_irq_enabled(ppsPin, GPIO_IRQ_EDGE_RISE, true);
+    irq_set_enabled(IO_IRQ_BANK0, true);
+}
 
 // ======================================================
 // Base Clock class tracks unixtime rel to millis/micros.
@@ -647,7 +657,7 @@ const int display_rotation = 1;
 #else // External 128x128 OLED
 Adafruit_SH1107 display = Adafruit_SH1107(128, 128, &Wire);  // ext 128x128 board
 const int display_address = 0x3D;
-const int display_rotation = 0;
+const int display_rotation = 2;
 #endif
 
 void setup_display(void) {
@@ -719,7 +729,9 @@ void setup() {
   // Light the on-board LED.
   pinMode(ledPin, OUTPUT);
   digitalWrite(ledPin, HIGH);
-  
+  pinMode(scopePin, OUTPUT);
+  digitalWrite(scopePin, HIGH);
+
   // I2C interface is started by display driver?
   Wire.begin();
   setup_display();  // includes i2c init.
@@ -740,6 +752,7 @@ long secs_last_change = 0;
 
 void loop() {
   digitalWrite(ledPin, digitalRead(sqwPin));
+  digitalWrite(scopePin, digitalRead(sqwPin));
 
   buttons_update();
   cmd_update();
