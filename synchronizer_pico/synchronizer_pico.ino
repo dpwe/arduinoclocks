@@ -9,7 +9,7 @@
 // with the Feather 128x64 OLED display and 3 input buttons connected ... somehow.
 
 #include <Wire.h>
-// Make efault I2C ("Wire") actually be Wire1 to match default on RP2040 Feather
+// Make default I2C ("Wire") actually be Wire1 to match default on RP2040 Feather
 #define Wire Wire1
 
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
@@ -27,12 +27,12 @@ const int btn_c_pin = 20;
 // =============================================================
 
 // Wiring:
-//   DS3231 SQWV out -> GP14
-//   GPS 1PPS out    -> GP15
-//   GPS tx out      -> GP1 (for Uart0 RX)
+//   GPS tx out      -> GP5 (for Uart1 RX)
+//   GPS 1PPS out    -> GP8
+//   DS3231 SQWV out -> GP9
 
-const int sqwPin = 14; // The number of the pin for monitor alarm status on DS3231
-const int ppsPin = 15; // PPS output from GPS board
+const int ppsPin = 8; // PPS output from GPS board
+const int sqwPin = 9; // The number of the pin for monitor alarm status on DS3231
 
 const int ledPin = 25; // On-board LED on Pico
 const int scopePin = 16; // Output to scope
@@ -663,7 +663,7 @@ const int display_rotation = 2;
 #endif
 
 void setup_display(void) {
-  Serial.println("About to initialized display...");
+  Serial.println("About to initialize display...");
   display.begin(display_address, true);
   Serial.println("Display initialized.");
 

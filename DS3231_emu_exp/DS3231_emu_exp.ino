@@ -86,9 +86,14 @@
   const int ext_sda_pin = 24;
   const int ext_scl_pin = 25;
   #define EXT_I2C Wire
+  const int int_sda_pin = 2;
+  const int int_scl_pin = 3;
   #define INT_I2C Wire1
 
-  #define DISPLAY_SH1107  // 128x64 mono OLED in Feather stack
+  #define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+
+//  #define SCREEN_HEIGHT 64
+  #define SCREEN_HEIGHT 128
 
 #else
   // ESP32-S3
@@ -158,9 +163,17 @@
 
 #ifdef DISPLAY_SH1107
   #include <Adafruit_SH110X.h>
-  
+
+  //#define FEATHER_OLED
+  #ifdef FEATHER_OLED
+    const int display_address = 0x3C;
+    #define SCREEN_HEIGHT 64
+  #else // standalone OLED
+    const int display_address = 0x3D;
+    #define SCREEN_HEIGHT 128
+  #endif
+
   #define SCREEN_WIDTH  128
-  #define SCREEN_HEIGHT 64
   #define SIZE_1X
 
   Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
@@ -190,9 +203,11 @@ void setup_display(void) {
   display.setRotation(3);
 #endif
 #ifdef DISPLAY_SH1107
-  display.begin(0x3C, true); // Address 0x3C default
+  Serial.println("About to initialize display...");
+  display.begin(display_address, true);
+  Serial.println("Display initialized.");
   display.display();  // Splashscreen
-  delay(500);
+  delay(1000);
   display.clearDisplay();
   display.display();
   display.setRotation(1);
@@ -645,92 +660,6 @@ void print_registers_fancy(uint8_t *registers) {
   Serial.println("");
 }
 
-// ======================================================
-// =========== Button management ==============
-// ======================================================
-
-#define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
-#ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
-int button_pins[NUM_BUTTONS] = {9, 8, 7};
-#else
-int button_pins[NUM_BUTTONS] = {9, 6, 5};
-#endif
-int button_state[NUM_BUTTONS] = {0, 0, 0};
-unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
-// For distinguishing short/long press
-int button_down_time = 0;
-
-// Keeping track of user interaction to control display sleep.
-long secs_last_action = 0;
-
-#define DEBOUNCE_MILLIS 50
-#define MILLIS_LONG_PRESS 500
-
-void buttons_setup(void) {
-  for (int button = 0; button < NUM_BUTTONS; ++button) {
-    pinMode(button_pins[button], INPUT_PULLUP);
-  }
-  sleep_tickle();
-}
-
-void buttons_update(void) {
-  for (int button = 0; button < NUM_BUTTONS; ++button) {
-    // Buttons are pulled up, so read as 1 when open, 0 when pressed.
-    int new_state = 1 - digitalRead(button_pins[button]);
-    if (button_state[button] == new_state) {
-      continue;
-    }
-    // State has changed.
-    unsigned long millis_now = millis();
-    unsigned long millis_since_last_change = millis_now - button_last_change_time[button];
-    button_last_change_time[button] = millis_now;
-    if (millis_since_last_change <= DEBOUNCE_MILLIS) {
-      continue;
-    }
-    // Debounced state change
-    button_state[button] = new_state;
-    if (new_state) {
-      // State changed to "pressed"
-      button_down_time = millis_now;
-      continue;
-    }
-    // State change was to "released".
-    bool long_press = (millis_now - button_down_time) > MILLIS_LONG_PRESS;
-    Serial.print("Button ");
-    Serial.print(button);
-    if (long_press) {
-      Serial.println(" long press");
-    } else {
-      Serial.println(" short press");
-    }
-    // Action - tickle the screensaver.
-    sleep_tickle();
-    switch(button) {
-      case 0:
-        if (long_press) {
-          sleep_display();
-        } else {
-
-        }
-        break;
-      case 1:
-        // Increase aging register
-        if (long_press) {
-
-        } else {
-          ds3231_delta_aging(1);
-        }
-        break;
-      case 2:
-        if (long_press) {
-
-        } else {
-          ds3231_delta_aging(-1);
-        }
-        break;
-    }
-  }
-}
 
 // -------------------------------------------------------------------
 // Input commands over serial line
@@ -1084,10 +1013,146 @@ void cmd_update(void) {
   }
 }
 
+// ========== GPS input ========
+
+// -------- PPS interrupt input -------
+
+// Wiring:
+//   GPS tx out      -> GP5 (for Uart1 RX)
+//   GPS 1PPS out    -> GP8
+const int ppsPin = 8; // PPS output from GPS board
+volatile unsigned long gps_micros = 0;
+
+#ifdef ARDUINO_ARCH_RP2040
+
+unsigned long my_micros(void) {
+  return timer_hw->timelr;
+}
+
+void gpio_transition() {
+  unsigned long now_micros = timer_hw->timelr;
+
+  if (gpio_get_irq_event_mask(ppsPin)) {
+    gps_micros = now_micros;
+    gpio_acknowledge_irq(ppsPin, IO_IRQ_BANK0);
+  }
+}
+
+void setup_interrupts(void) {
+    irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
+    // GPS PPS pin samples on rise.
+    gpio_set_irq_enabled(ppsPin, GPIO_IRQ_EDGE_RISE, true);
+    irq_set_enabled(IO_IRQ_BANK0, true);
+}
+#else // !RP2040
+#error "PPS interrupt handling not implemented on this architecture."
+#endif // RP2040
+
+// -------- GPS serial input -------
+
+#include <TinyGPS.h>       // http://arduiniana.org/libraries/TinyGPS/
+
+// 2nd UART on Pico - RX,TX is GP5,GP4 (or GP9,GP8)
+#define SerialGPS Serial2
+
+TinyGPS gps;
+
+bool pending_GPS_interrupt = false;
+
+DateTime gps_now(class TinyGPS& gps) {
+  unsigned long date, time, age_millis;
+  gps.get_datetime(&date, &time, &age_millis);
+  // We *could* add age_millis to get current time, but we really want the sync'd time from the last second.
+  // date and time are stored as digit pairs in decimal i.e. ddmmyy and hhmmsscc.
+  int centis = time % 100;
+  //Serial.print("gps centis=");
+  //Serial.println(centis);
+  // it's always 0.
+  time /= 100;
+  uint8_t sec = time % 100;
+  time /= 100;
+  uint8_t min = time % 100;
+  time /= 100;
+  uint8_t hour = time % 100;
+  uint16_t year = (date % 100) + 2000 - 1970;
+  date /= 100;
+  uint8_t month = date % 100;
+  date /= 100;
+  uint8_t day = date % 100;
+  return DateTime(year, month, day, hour, min, sec);
+}
+
+bool gps_time_valid(class TinyGPS& gps) {
+  // It's only valid if it was updated within the past second.
+  unsigned long time, age_millis;
+  gps.get_datetime(0, &time, &age_millis);
+  Serial.print("gps_time=");
+  Serial.print(time);
+  Serial.print(" age_millis=");
+  Serial.println(age_millis);
+  return (time != gps.GPS_INVALID_TIME) && (age_millis < 1000);
+}
+
+unsigned long last_gps_micros = 0;
+
+void sync_time_from_GPS(void) {
+  // This is called soon after an A1 transition is detected, so GPS unixtime is still current.
+  Serial.println("sync_time_from_gps");
+  if (gps_time_valid(gps)) {
+    Serial.println("gps_time_valid");
+    // We can assume that the last-stored time from the GPS messages is the second *preceeding* this mark,
+    // so we add 1 second to get the actual time corresponding to the mark.
+    // (potential race condition).
+    delayMicroseconds(997000 - (my_micros() - gps_micros));
+    RTC_set_time(DateTime(gps_now(gps).unixtime() + 1));
+    last_gps_micros = gps_micros;
+  }
+}
+
+void setup_GPS_serial(void) {
+#ifdef ARDUINO_ARCH_RP2040
+  // Configure Pico UART2
+  Serial2.setRX(5);
+  Serial2.setTX(4);
+#endif
+  //Serial2.begin(9600);
+  SerialGPS.begin(9600);
+}
+
+void update_GPS_serial(void) {
+  while (SerialGPS.available()) {
+    char c = SerialGPS.read();
+    //Serial.print(c);
+    gps.encode(c);
+  }
+}
+
+bool request_RTC_sync = false;
+
+void setup_GPS(void) {
+    pinMode(ppsPin, INPUT_PULLUP); // Set alarm pin as pullup
+}
+
+void update_GPS(void) {
+  if (pending_GPS_interrupt) {
+    pending_GPS_interrupt = false;
+    // Request for sync e.g. from button press.
+    if (request_RTC_sync) {
+      Serial.println("Setting DS3231 from GPS");
+      sync_time_from_GPS();
+      request_RTC_sync = false;
+    }
+  }
+}
+
 // ================ DS3231_emulator ================
 
 // Emit SQWV on LED pin.
+#ifdef ARDUINO_ARCH_RP2040
+const int SQWV_PIN = 25; // On-board LED on Pico
+#else
 #define SQWV_PIN 13
+#endif
 
 // Include Arduino Wire library for I2C
 //#include <Wire.h>
@@ -1153,7 +1218,7 @@ void timer_update_trim_ppb(int ppb) {
 const char *clock_name = "10M";
 
 // Where the frequency to count is coming in.
-int timer_tenMHzInputPin = 19;  // Must be odd-numbered (PWM Chan B) pin.
+int timer_tenMHzInputPin = 7; // 19;  // Must be odd-numbered (PWM Chan B) pin.
 
 uint8_t timer_sliceNum = 0;
 
@@ -1665,6 +1730,101 @@ void sleep_tickle(void) {
   }
 }
 
+// ======================================================
+// =========== Button management ==============
+// ======================================================
+
+#define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
+#ifdef ARDUINO_ARCH_RP2040
+#ifdef PIN_NEOPIXEL // i.e., this is a Feather RP2040
+int button_pins[NUM_BUTTONS] = {9, 8, 7};
+#else // RP2040 Pico
+int button_pins[NUM_BUTTONS] = {18, 19, 20};
+#endif
+#else
+int button_pins[NUM_BUTTONS] = {9, 6, 5};
+#endif
+int button_state[NUM_BUTTONS] = {0, 0, 0};
+unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
+// For distinguishing short/long press
+int button_down_time = 0;
+
+// Keeping track of user interaction to control display sleep.
+long secs_last_action = 0;
+
+#define DEBOUNCE_MILLIS 50
+#define MILLIS_LONG_PRESS 500
+
+void buttons_setup(void) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    pinMode(button_pins[button], INPUT_PULLUP);
+  }
+  sleep_tickle();
+}
+
+void buttons_update(void) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    // Buttons are pulled up, so read as 1 when open, 0 when pressed.
+    int new_state = 1 - digitalRead(button_pins[button]);
+    if (button_state[button] == new_state) {
+      continue;
+    }
+    // State has changed.
+    unsigned long millis_now = millis();
+    unsigned long millis_since_last_change = millis_now - button_last_change_time[button];
+    button_last_change_time[button] = millis_now;
+    if (millis_since_last_change <= DEBOUNCE_MILLIS) {
+      continue;
+    }
+    // Debounced state change
+    button_state[button] = new_state;
+    if (new_state) {
+      // State changed to "pressed"
+      button_down_time = millis_now;
+      continue;
+    }
+    // State change was to "released".
+    bool long_press = (millis_now - button_down_time) > MILLIS_LONG_PRESS;
+    Serial.print("Button ");
+    Serial.print(button);
+    if (long_press) {
+      Serial.println(" long press");
+    } else {
+      Serial.println(" short press");
+    }
+    // Action - tickle the screensaver.
+    sleep_tickle();
+    switch(button) {
+      case 0:
+        if (long_press) {
+          sleep_display();
+        } else {
+          request_RTC_sync = true;
+          Serial.print("gps_micros=");
+          Serial.print(gps_micros);
+          Serial.print(" last_gps_micros=");
+          Serial.println(last_gps_micros);
+        }
+        break;
+      case 1:
+        // Increase aging register
+        if (long_press) {
+
+        } else {
+          ds3231_delta_aging(1);
+        }
+        break;
+      case 2:
+        if (long_press) {
+
+        } else {
+          ds3231_delta_aging(-1);
+        }
+        break;
+    }
+  }
+}
+
 // --------- I2C Delegate handlers (on EXT_I2C) --------------
 
 volatile uint8_t cursor = 0;  // Address of next register access.
@@ -1752,19 +1912,12 @@ void open_serial(int baudrate=9600) {
 
 void setup()
 {
-  // Configure SQWV output pin (typically LED).
-  pinMode(SQWV_PIN, OUTPUT);
-  digitalWrite(SQWV_PIN, HIGH);  // Default state.
-  
-  open_serial();
-
-  Serial.print(F("DS3231_emu_exp "));
-  Serial.print(__DATE__);
-  Serial.print(" ");
-  Serial.println(__TIME__);
-
 #ifdef ARDUINO_ARCH_RP2040
   // Configure Pico RP2040 I2C
+  // Internal I2C is used to communicate with I2C peripherals.
+  INT_I2C.setSDA(int_sda_pin);
+  INT_I2C.setSCL(int_scl_pin);
+  // External I2C is the one we act as a peripheral (DS3231) on.
   EXT_I2C.setSDA(ext_sda_pin);
   EXT_I2C.setSCL(ext_scl_pin);
   EXT_I2C.begin(DS3231_ADDRESS);
@@ -1777,6 +1930,24 @@ void setup()
   // Function to run when data received from master
   EXT_I2C.onReceive(receiveEvent);
 
+  // Configure SQWV output pin (typically LED).
+  pinMode(SQWV_PIN, OUTPUT);
+  digitalWrite(SQWV_PIN, HIGH);  // Default state.
+  
+  open_serial();
+
+  Serial.print(F("DS3231_emu_exp "));
+  Serial.print(__DATE__);
+  Serial.print(" ");
+  Serial.println(__TIME__);
+
+  INT_I2C.begin();
+  setup_display();
+
+  // GPS input
+  setup_GPS_serial();
+  setup_interrupts();
+
   // Setup ds3231 to use accessor functions instead of reading across I2C.
   ds3231.begin(&read_registers_fn, &write_registers_fn);
 
@@ -1786,7 +1957,6 @@ void setup()
   temperature_setup();
 
   // Explorer setup
-  setup_display();
   cmd_setup();
   buttons_setup();
 }
@@ -1828,11 +1998,18 @@ void loop() {
       if(display_on) {
         ds3231_display(ds3231, clock_name);
       }
+      Serial.print("tick - gps=");
+      Serial.println((long int)(tick_micros - gps_micros));
     }
   }
 
   // Maybe sleep display
   sleep_update();
+
+  // Handle input from GPS
+  if (gps_micros != last_gps_micros)  pending_GPS_interrupt = true;
+  update_GPS_serial();
+  update_GPS();
 
   delay(polling_interval);
 }

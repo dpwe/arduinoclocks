@@ -17,9 +17,9 @@
 const int sda_pin = 2;
 const int scl_pin = 3;
 
-const int ledPin = 25; // On-board LED on Pico
+const int ledPin = 25;  // On-board LED on Pico
 
-const int gps_pps_pin = 4; // Master input.
+const int gps_pps_pin = 4;  // Master input.
 
 // =============================================================
 // PPS change time recording.
@@ -33,10 +33,10 @@ typedef struct pps_pin_info {
 
 #define MAX_PPSS 4
 pps_pin_info_t pps_pins[MAX_PPSS] = {
-  {gps_pps_pin, true, true},  // pin 4 = GPS PPS (rising edge)
-  {5, false, true},  // pin 5 = Real DS3231 (falling edge)
-  {6, false, true},
-  {7, false, true},
+  { gps_pps_pin, true, true },  // pin 4 = GPS PPS (rising edge)
+  { 5, false, true },           // pin 5 = Real DS3231 (falling edge)
+  { 6, false, true },
+  { 7, false, true },
 };
 // Last recorded event times for each input.
 volatile uint32_t last_pps_time[MAX_PPSS];
@@ -66,7 +66,7 @@ void setup_interrupts(void) {
   for (int pps = 0; pps < MAX_PPSS; ++pps) {
     if (pps_pins[pps].active) {
       int pps_pin = pps_pins[pps].pin;
-      gpio_init(pps_pin); 
+      gpio_init(pps_pin);
       gpio_set_dir(pps_pin, GPIO_IN);
       if (pps_pins[pps].rising) {
         gpio_set_irq_enabled(pps_pin, GPIO_IRQ_EDGE_RISE, true);
@@ -74,7 +74,7 @@ void setup_interrupts(void) {
         gpio_set_irq_enabled(pps_pin, GPIO_IRQ_EDGE_FALL, true);
       }
     }
-  irq_set_enabled(IO_IRQ_BANK0, true);
+    irq_set_enabled(IO_IRQ_BANK0, true);
   }
 }
 
@@ -98,7 +98,7 @@ void cmd_update(void) {
       cmd_buffer[cmd_len] = '\0';
       if (cmd_len > 0) {
         byte cmd0 = cmd_buffer[0];
-        if (cmd0 >= 'a' && cmd0 <= 'z')  cmd0 -= ('a' - 'A');
+        if (cmd0 >= 'a' && cmd0 <= 'z') cmd0 -= ('a' - 'A');
         switch (cmd0) {
           case '?':
             Serial.println("(no commands)");
@@ -165,8 +165,8 @@ void loop() {
   digitalWrite(ledPin, digitalRead(gps_pps_pin));
 
   cmd_update();
-  
-  if(last_seen_pps_time != last_pps_time[0]) {
+
+  if (last_seen_pps_time != last_pps_time[0]) {
     last_seen_pps_time = last_pps_time[0];
     // Emit log - micros skew for each clock to 0 edge.
     for (int pin = 0; pin < MAX_PPSS; ++pin) {
