@@ -94,7 +94,7 @@
     #define FEATHER_RP2040
     #define FEATHER_OLED
   #else
-    #define PICO_RP2040
+    #define MY_PICO_RP2040
   #endif
   // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
   // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
@@ -247,10 +247,10 @@ void setup_display(void) {
 
 // ------ DS3231 internal status display ------
 
-char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
-char *STATUS_SHORTNAMES[8]  = {"O", "x", "x", "x", "3", "B", "F", "F"};
+const char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
+const char *STATUS_SHORTNAMES[8]  = {"O", "x", "x", "x", "3", "B", "F", "F"};
 
-void print_bits_tft(uint16_t x, uint16_t y, uint8_t val, char* names[8], uint16_t fgcolor=WHITE, uint16_t bgcolor=BLACK) {
+void print_bits_tft(uint16_t x, uint16_t y, uint8_t val, const char* names[8], uint16_t fgcolor=WHITE, uint16_t bgcolor=BLACK) {
   // Print a bit set using an array of names.
   uint8_t mask = 0x80;  // Start with top bit.
   display.setTextColor(fgcolor, bgcolor);
@@ -522,7 +522,7 @@ void itoa2(int num, char *s, int base=10) {
   *s++ = '\0';
 }
 
-void sprint_bits(uint8_t val, char* names[8], char *s) {
+void sprint_bits(uint8_t val, const char* names[8], char *s) {
   // Print a bit set using an array of names.
   uint8_t mask = 0x80;  // Actually start with top bit.
   for (uint8_t bit = 0; bit < 8; ++bit) {
@@ -537,7 +537,7 @@ void sprint_bits(uint8_t val, char* names[8], char *s) {
   }
 }
 
-void print_bits(uint8_t val, char* names[8]) {
+void print_bits(uint8_t val, const char* names[8]) {
   // Print bits.  Special case for to_display.
   char s[70];
   sprint_bits(val, names, s);
@@ -654,8 +654,8 @@ void print_registers(uint8_t *registers) {
   Serial.println("");
 }
 
-char *CONTROL_NAMES[8] = {"#EO", "BSQ", "CNV", "RS2", "RS1", "INT", "A2E", "A1E"};
-char *STATUS_NAMES[8]  = {"OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F"};
+const char *CONTROL_NAMES[8] = {"#EO", "BSQ", "CNV", "RS2", "RS1", "INT", "A2E", "A1E"};
+const char *STATUS_NAMES[8]  = {"OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F"};
 
 void print_registers_fancy(uint8_t *registers) {
   // Decode the entire state of the DS3231 to the terminal.
@@ -787,7 +787,7 @@ DateTime parse_time_string(char *time_string) {
                   atoi2(time_string + 8), atoi2(time_string + 10), atoi2(time_string + 12));
 }
 
-void print_enabled_disabled(char *s, int v) {
+void print_enabled_disabled(const char *s, int v) {
   Serial.print(s);
   Serial.print(" ");
   if (v == 0) Serial.println("disabled.");
@@ -1086,15 +1086,18 @@ void cmd_update(void) {
 // Wiring:              RP2040 Pico          Feather RP2040   Feather ESP32
 //   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
 //   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
-#ifdef PICO_RP2040
+#ifdef MY_PICO_RP2040
   const int ppsPin = 8; // PPS output from GPS board
 #else
-  const int ppsPin = A2; // PPS output from GPS board
+  const int ppsPin = 28; // PPS output from GPS board
+  #warning "pps pin A2"
 #endif
 
 volatile unsigned long gps_micros = 0;
 
 #ifdef ARDUINO_ARCH_RP2040
+
+#warning "RP2040 interrupts"
 
 unsigned long my_micros(void) {
   return timer_hw->timelr;
@@ -1118,6 +1121,8 @@ void setup_interrupts(void) {
 #else // !RP2040
 
 // Use Arduino interrupt handler (longer latency, more portable)
+#warning "Arduino interrupts"
+
 void gps_mark_isr(void) {
   unsigned long now_micros = micros();
   gps_micros = now_micros;
@@ -1129,6 +1134,8 @@ void setup_interrupts() {
   attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
 }
 
+#define my_micros micros
+
 #endif // !RP2040
 
 // -------- GPS serial input -------
@@ -1136,7 +1143,7 @@ void setup_interrupts() {
 #include <TinyGPS.h>       // http://arduiniana.org/libraries/TinyGPS/
 
 // 2nd UART on Pico - RX,TX is GP5,GP4 (or GP9,GP8)
-#ifdef PICO_RP2040
+#ifdef MY_PICO_RP2040
   #define SerialGPS Serial2
 #else
   #define SerialGPS Serial1
@@ -1199,10 +1206,13 @@ void sync_time_from_GPS(void) {
 
 void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040
-  #ifdef PICO_RP2040
+  #ifdef MY_PICO_RP2040
     // Configure Pico UART2
     SerialGPS.setRX(5);
     SerialGPS.setTX(4);
+  #else
+    SerialGPS.setRX(1);
+    SerialGPS.setTX(0);
   #endif
   SerialGPS.begin(9600);
 #else
@@ -1248,7 +1258,7 @@ void update_GPS(void) {
 // ================ DS3231_emulator ================
 
 // Emit SQWV on LED pin.
-#ifdef PICO_RP2040
+#ifdef MY_PICO_RP2040
  #define SQWV_PIN_RP2040  25 // On-board LED on Pico, run in parallel.
 #endif
 #define SQWV_PIN 13
@@ -1317,7 +1327,14 @@ void timer_update_trim_ppb(int ppb) {
 const char *clock_name = "10M";
 
 // Where the frequency to count is coming in.
-int timer_tenMHzInputPin = 7; // 19;  // Must be odd-numbered (PWM Chan B) pin.
+// On RP2040, must be odd-numbered (PWM Chan B) pin to use PWM freq counter.
+#ifdef MY_PICO_RP2040
+  int timer_tenMHzInputPin = 7;
+  #warning "10MHz input on GP7"
+#else  // FEATHER_RP2040
+  int timer_tenMHzInputPin = 19;
+  #warning "10MHz input on GP19"
+#endif
 
 uint8_t timer_sliceNum = 0;
 
@@ -1849,6 +1866,7 @@ void sleep_tickle(void) {
 #ifdef ARDUINO_ARCH_RP2040
   #ifdef FEATHER_RP2040 // i.e., this is a Feather RP2040
     int button_pins[NUM_BUTTONS] = {9, 8, 7};
+    #warning "Feather RP2040"
   #else // RP2040 Pico
     int button_pins[NUM_BUTTONS] = {18, 19, 20};
   #endif
