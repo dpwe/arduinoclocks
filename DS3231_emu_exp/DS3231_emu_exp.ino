@@ -303,7 +303,7 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
   }
 }
 
-void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name) {
+void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name, bool gps_active) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
   // HHHH::MMMM::SSSS (double-size)
@@ -324,6 +324,16 @@ void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name) {
   display.setTextColor(RED, BLACK);
   display.setCursor(18 * CHAR_W, 0);
   display.print(clock_name);
+
+  // GPS status
+  display.setCursor(18 * CHAR_W, ROW_H);
+  if (gps_active) {
+    display.setTextColor(BLACK, GREEN);
+    display.print("GPS");
+  } else {
+    display.setTextColor(GREEN, BLACK);
+    display.print("   ");
+  }
 
   // Time, double size.
   display.setTextSize(LARGE_SIZE);
@@ -395,6 +405,39 @@ void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name) {
 #ifdef DISPLAY_SH1107
   display.display();
 #endif
+}
+
+void display_skew_us(long int skew_microseconds) {
+  char s[5]; // "-0.0\0"
+  long int skew_milliseconds;
+  if (skew_microseconds < 0) {
+    s[0] = '-';
+    skew_microseconds = -skew_microseconds;
+  } else {
+    s[0] = '+';
+  }
+  if (skew_microseconds >= 9950L) {
+    // format as +/-123
+    skew_microseconds += 500;  // rounding
+    skew_milliseconds = skew_microseconds / 1000L;
+    if (skew_milliseconds > 999L) {
+      skew_milliseconds = 999L;
+    }
+    itoa(skew_microseconds, s + 1, 10);
+  } else {
+    // format as +/-0.1
+    // Round up
+    skew_microseconds += 50; // rounding
+    skew_milliseconds = skew_microseconds / 1000L;
+    s[1] = '0' + skew_milliseconds;
+    s[2] = '.';
+    s[3] = '0' + ((skew_microseconds / 100L) - (10 * skew_milliseconds));
+  }
+  s[4] = '\0';
+  // Now actually display it.
+  display.setTextColor(RED, BLACK);
+  display.setCursor(17 * CHAR_W, 2 * ROW_H);
+  display.print(s);
 }
 
 // -------------- Time --------------------
@@ -848,6 +891,11 @@ void handle_cmd(char cmd, char * arg) {
     }
     print_enabled_disabled("Master osc", !(ctrl & 0x80));
     break;
+  
+   case 'G':
+    // Print current microseconds skew vs. GPS, if any.
+    print_gps_skew();
+    break;
     
    case 'I':
     // Enable alarm interrupt outputs on SQWV (bit 2 of CONTROL).
@@ -1057,8 +1105,6 @@ void setup_interrupts(void) {
 
 TinyGPS gps;
 
-bool pending_GPS_interrupt = false;
-
 DateTime gps_now(class TinyGPS& gps) {
   unsigned long date, time, age_millis;
   gps.get_datetime(&date, &time, &age_millis);
@@ -1074,7 +1120,7 @@ DateTime gps_now(class TinyGPS& gps) {
   uint8_t min = time % 100;
   time /= 100;
   uint8_t hour = time % 100;
-  uint16_t year = (date % 100) + 2000 - 1970;
+  uint16_t year = (date % 100) + 2000;
   date /= 100;
   uint8_t month = date % 100;
   date /= 100;
@@ -1105,7 +1151,6 @@ void sync_time_from_GPS(void) {
     // (potential race condition).
     delayMicroseconds(997000 - (my_micros() - gps_micros));
     RTC_set_time(DateTime(gps_now(gps).unixtime() + 1));
-    last_gps_micros = gps_micros;
   }
 }
 
@@ -1127,6 +1172,8 @@ void update_GPS_serial(void) {
   }
 }
 
+bool gps_active = false;
+
 bool request_RTC_sync = false;
 
 void setup_GPS(void) {
@@ -1134,8 +1181,8 @@ void setup_GPS(void) {
 }
 
 void update_GPS(void) {
-  if (pending_GPS_interrupt) {
-    pending_GPS_interrupt = false;
+  if (gps_micros != last_gps_micros) {
+    last_gps_micros = gps_micros;
     // Request for sync e.g. from button press.
     if (request_RTC_sync) {
       Serial.println("Setting DS3231 from GPS");
@@ -1143,16 +1190,22 @@ void update_GPS(void) {
       request_RTC_sync = false;
     }
   }
+  if((micros() - last_gps_micros) < 2000000) {
+    gps_active = true;
+  } else {
+    gps_active = false;
+  }
 }
+
+
 
 // ================ DS3231_emulator ================
 
 // Emit SQWV on LED pin.
 #ifdef ARDUINO_ARCH_RP2040
-const int SQWV_PIN = 25; // On-board LED on Pico
-#else
-#define SQWV_PIN 13
+#define SQWV_PIN_RP2040  25 // On-board LED on Pico
 #endif
+#define SQWV_PIN 13
 
 // Include Arduino Wire library for I2C
 //#include <Wire.h>
@@ -1667,6 +1720,10 @@ void clock_tick(void) {
   registers_next = tmp;
   // Update the output pin.
   digitalWrite(SQWV_PIN, registers[DS3231_OUTPINSTATE]);
+  #ifdef SQWV_PIN_RP2040
+  digitalWrite(SQWV_PIN_RP2040, registers[DS3231_OUTPINSTATE]);
+  #endif
+
   if (!CHECK_BIT(registers[DS3231_CONTROL], DS3231_C_INTCN)) {
     // Set up semaphore for the oscillator pulse to be reset later.
     last_sqwv_millis = millis();
@@ -1677,6 +1734,14 @@ void clock_tick(void) {
   tick_micros = micros();
 }
 
+void print_gps_skew(void) {
+    if (!gps_active) {
+      Serial.println("GPS not active.");
+    } else {
+      Serial.print("RTC - GPS microseconds=");
+      Serial.println((long int)(tick_micros - gps_micros));
+    }
+  }
 
 // ------------- Display sleep (screensaver) -----------
 
@@ -1689,7 +1754,7 @@ void wake_up_display(void) {
   analogWrite(TFT_BACKLITE, 128);
 #endif
   display_on = true;
-  ds3231_display(ds3231, clock_name);
+  ds3231_display(ds3231, clock_name, gps_active);
 }
 
 void sleep_display(void) {
@@ -1933,7 +1998,11 @@ void setup()
   // Configure SQWV output pin (typically LED).
   pinMode(SQWV_PIN, OUTPUT);
   digitalWrite(SQWV_PIN, HIGH);  // Default state.
-  
+#ifdef SQWV_PIN_RP2040
+  pinMode(SQWV_PIN_RP2040, OUTPUT);
+  digitalWrite(SQWV_PIN_RP2040, HIGH);  // Default state.
+#endif
+
   open_serial();
 
   Serial.print(F("DS3231_emu_exp "));
@@ -1973,6 +2042,10 @@ void loop() {
   // Do we need to reset the SQWV output 1Hz low pulse?
   if (last_sqwv_millis && (now_millis - last_sqwv_millis) >= sqwv_pulse_ms) {
     digitalWrite(SQWV_PIN, HIGH);
+  #ifdef SQWV_PIN_RP2040
+    // 2nd pin mirrors SQWV.
+    digitalWrite(SQWV_PIN_RP2040, HIGH);
+  #endif
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
   }
   // If the clock ticked, set up for next second.
@@ -1996,10 +2069,13 @@ void loop() {
       last_sec = now_sec;
       //update_display(dt);
       if(display_on) {
-        ds3231_display(ds3231, clock_name);
+        if(gps_active) {
+          display_skew_us((long int)(tick_micros - gps_micros));
+        }
+        ds3231_display(ds3231, clock_name, gps_active);
       }
-      Serial.print("tick - gps=");
-      Serial.println((long int)(tick_micros - gps_micros));
+      //Serial.print("tick - gps=");
+      //Serial.println((long int)(tick_micros - gps_micros));
     }
   }
 
@@ -2007,7 +2083,6 @@ void loop() {
   sleep_update();
 
   // Handle input from GPS
-  if (gps_micros != last_gps_micros)  pending_GPS_interrupt = true;
   update_GPS_serial();
   update_GPS();
 
