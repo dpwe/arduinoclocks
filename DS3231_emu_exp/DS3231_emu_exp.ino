@@ -1189,8 +1189,10 @@ void sync_time_from_GPS(void) {
     // We can assume that the last-stored time from the GPS messages is the second *preceeding* this mark,
     // so we add 1 second to get the actual time corresponding to the mark.
     // (potential race condition).
+    // Then, we delay for most of a second to be able to anticipate the actual moment
+    // so we add another second to the time we set.
     delayMicroseconds(996950 - (my_micros() - gps_micros));
-    last_gps_sync_unixtime = gps_now(gps).unixtime() + 1;
+    last_gps_sync_unixtime = gps_now(gps).unixtime() + 2;
     RTC_set_time(DateTime(last_gps_sync_unixtime));
   }
 }
