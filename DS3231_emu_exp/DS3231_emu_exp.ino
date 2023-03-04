@@ -40,16 +40,25 @@
 // ZYYYYMMDDhhmmss - Set date/time
 
 // Emulator design:
-//   Arduino as I2C Secondary emulates behavior of DS3231 RTC
+//  Arduino as I2C Secondary emulates behavior of DS3231 RTC
 //  including alarms and 1Hz SQWV output on SQWV_PIN
-//  but no 32 kHz output nor other SQWV frequencies
-//  and aging offset has no influence on time.
+//  but no 32 kHz output nor other SQWV frequencies.
+//  Aging is currently interpreted as ppb but limited to 
+//  8 bits signed, so max -128ppb/+127ppb.
 //
-//  Connections:
-//
-//     A4  I2C Data
-//     A5  I2C Clock
-//     D13 SQWV/_INT output
+//  Wiring:
+//                   RP2040 Pico     Feather RP2040  ESP32 Feather
+//  10MHz in         GP7                 GP19
+//  I2C server SDA   GP16 I2C0SDA    A4  GP24
+//  I2C server SCL   GP17 I2C0SCL    A5  GP25
+//  RTC PPS out      GP13            D13 GP13
+//  GPS PPS in       GP8             A2  GP28
+//  GPS Serial in    GP5  UART1RX    RX  GP1
+//  I2C display SDA  GP2  I2C1SDA    SDA GP2
+//  I2C display SCL  GP3  I2C1SCL    SCL GP3
+//  BTN A            GP18                GP9
+//  BTN B            GP19                GP8
+//  BTN C            GP20                GP7
 //
 //  DESIGN
 //
@@ -81,19 +90,22 @@
 #include <RTClib.h>         // Adafruit; defines RTC_DS3231
 
 #ifdef ARDUINO_ARCH_RP2040
+  #ifdef PIN_NEOPIXEL // i.e., this is a Feather RP2040
+    #define FEATHER_RP2040
+    #define FEATHER_OLED
+  #else
+    #define PICO_RP2040
+  #endif
   // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
   // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
-  const int ext_sda_pin = 24;
-  const int ext_scl_pin = 25;
+  const int ext_sda_pin = 16;  // 24;
+  const int ext_scl_pin = 17;  // 25;
   #define EXT_I2C Wire
   const int int_sda_pin = 2;
   const int int_scl_pin = 3;
   #define INT_I2C Wire1
 
   #define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
-
-//  #define SCREEN_HEIGHT 64
-  #define SCREEN_HEIGHT 128
 
 #else
   // ESP32-S3
@@ -108,7 +120,7 @@
 #endif
 
 
-// ------------- Display ---------------
+// ------------- General Display ---------------
 
 #include <Adafruit_GFX.h>
 
@@ -164,7 +176,6 @@
 #ifdef DISPLAY_SH1107
   #include <Adafruit_SH110X.h>
 
-  //#define FEATHER_OLED
   #ifdef FEATHER_OLED
     const int display_address = 0x3C;
     #define SCREEN_HEIGHT 64
@@ -190,6 +201,20 @@
 
 #endif
 
+#ifdef SIZE_1X
+  // 1x size
+  #define SMALL_SIZE 1
+  #define LARGE_SIZE 2
+  #define ROW_H 8
+  #define CHAR_W 6
+#else
+  // 2x size
+  #define SMALL_SIZE 2
+  #define LARGE_SIZE 4
+  #define ROW_H 16
+  #define CHAR_W 12
+#endif
+
 void setup_display(void) {
 #ifdef DISPLAY_SSD1351
   display.begin();
@@ -203,9 +228,7 @@ void setup_display(void) {
   display.setRotation(3);
 #endif
 #ifdef DISPLAY_SH1107
-  Serial.println("About to initialize display...");
   display.begin(display_address, true);
-  Serial.println("Display initialized.");
   display.display();  // Splashscreen
   delay(1000);
   display.clearDisplay();
@@ -222,24 +245,10 @@ void setup_display(void) {
   display.print("DS3231_emu_exp");
 }
 
+// ------ DS3231 internal status display ------
+
 char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
 char *STATUS_SHORTNAMES[8]  = {"O", "x", "x", "x", "3", "B", "F", "F"};
-
-#ifdef SIZE_1X
-// 1x size
-#define SMALL_SIZE 1
-#define LARGE_SIZE 2
-#define ROW_H 8
-#define CHAR_W 6
-
-#else
-// 2x size
-#define SMALL_SIZE 2
-#define LARGE_SIZE 4
-#define ROW_H 16
-#define CHAR_W 12
-
-#endif
 
 void print_bits_tft(uint16_t x, uint16_t y, uint8_t val, char* names[8], uint16_t fgcolor=WHITE, uint16_t bgcolor=BLACK) {
   // Print a bit set using an array of names.
@@ -407,10 +416,16 @@ void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name, bool gps_a
 #endif
 }
 
+// ------ Skew re: GPS display -----
+
+bool gps_active = false;
+
 void display_skew_us(long int skew_microseconds) {
+  Serial.print("display_skew_us=");
+  Serial.println(skew_microseconds);  
   char s[5]; // "-0.0\0"
   long int skew_milliseconds;
-  if (skew_microseconds < 0) {
+  if (skew_microseconds < 0L) {
     s[0] = '-';
     skew_microseconds = -skew_microseconds;
   } else {
@@ -423,21 +438,24 @@ void display_skew_us(long int skew_microseconds) {
     if (skew_milliseconds > 999L) {
       skew_milliseconds = 999L;
     }
-    itoa(skew_microseconds, s + 1, 10);
+    itoa(skew_milliseconds, s + 1, 10);
   } else {
     // format as +/-0.1
     // Round up
-    skew_microseconds += 50; // rounding
+    skew_microseconds += 50L; // rounding
     skew_milliseconds = skew_microseconds / 1000L;
     s[1] = '0' + skew_milliseconds;
     s[2] = '.';
     s[3] = '0' + ((skew_microseconds / 100L) - (10 * skew_milliseconds));
   }
+  if (s[2] == '\0')  { s[2] = ' '; s[3] = '\0'; }
+  if (s[3] == '\0')  { s[3] = ' '; s[4] = '\0'; }
   s[4] = '\0';
   // Now actually display it.
   display.setTextColor(RED, BLACK);
   display.setCursor(17 * CHAR_W, 2 * ROW_H);
-  display.print(s);
+  if (gps_active)  display.print(s);
+  else             display.print("    ");
 }
 
 // -------------- Time --------------------
@@ -704,8 +722,8 @@ void print_registers_fancy(uint8_t *registers) {
 }
 
 
-// -------------------------------------------------------------------
-// Input commands over serial line
+// ---------------------- CLI -----------------------------------------
+// DS3231 Explorer: Input commands over serial line
 
 // ms to pause between polling calls.  0=disable polling.
 int polling_interval = 0;
@@ -1065,10 +1083,15 @@ void cmd_update(void) {
 
 // -------- PPS interrupt input -------
 
-// Wiring:
-//   GPS tx out      -> GP5 (for Uart1 RX)
-//   GPS 1PPS out    -> GP8
-const int ppsPin = 8; // PPS output from GPS board
+// Wiring:              RP2040 Pico          Feather RP2040   Feather ESP32
+//   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
+//   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
+#ifdef PICO_RP2040
+  const int ppsPin = 8; // PPS output from GPS board
+#else
+  const int ppsPin = A2; // PPS output from GPS board
+#endif
+
 volatile unsigned long gps_micros = 0;
 
 #ifdef ARDUINO_ARCH_RP2040
@@ -1093,15 +1116,31 @@ void setup_interrupts(void) {
     irq_set_enabled(IO_IRQ_BANK0, true);
 }
 #else // !RP2040
-#error "PPS interrupt handling not implemented on this architecture."
-#endif // RP2040
+
+// Use Arduino interrupt handler (longer latency, more portable)
+void gps_mark_isr(void) {
+  unsigned long now_micros = micros();
+  gps_micros = now_micros;
+}
+
+void setup_interrupts() {
+  // GPS mark is on rising edge.
+  pinMode(ppsPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
+}
+
+#endif // !RP2040
 
 // -------- GPS serial input -------
 
 #include <TinyGPS.h>       // http://arduiniana.org/libraries/TinyGPS/
 
 // 2nd UART on Pico - RX,TX is GP5,GP4 (or GP9,GP8)
-#define SerialGPS Serial2
+#ifdef PICO_RP2040
+  #define SerialGPS Serial2
+#else
+  #define SerialGPS Serial1
+#endif
 
 TinyGPS gps;
 
@@ -1140,6 +1179,7 @@ bool gps_time_valid(class TinyGPS& gps) {
 }
 
 unsigned long last_gps_micros = 0;
+time_t last_gps_sync_unixtime = 0;
 
 void sync_time_from_GPS(void) {
   // This is called soon after an A1 transition is detected, so GPS unixtime is still current.
@@ -1149,19 +1189,24 @@ void sync_time_from_GPS(void) {
     // We can assume that the last-stored time from the GPS messages is the second *preceeding* this mark,
     // so we add 1 second to get the actual time corresponding to the mark.
     // (potential race condition).
-    delayMicroseconds(997000 - (my_micros() - gps_micros));
-    RTC_set_time(DateTime(gps_now(gps).unixtime() + 1));
+    delayMicroseconds(996950 - (my_micros() - gps_micros));
+    last_gps_sync_unixtime = gps_now(gps).unixtime() + 1;
+    RTC_set_time(DateTime(last_gps_sync_unixtime));
   }
 }
 
 void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040
-  // Configure Pico UART2
-  Serial2.setRX(5);
-  Serial2.setTX(4);
-#endif
-  //Serial2.begin(9600);
+  #ifdef PICO_RP2040
+    // Configure Pico UART2
+    SerialGPS.setRX(5);
+    SerialGPS.setTX(4);
+  #endif
   SerialGPS.begin(9600);
+#else
+  // Feather ESP32
+  SerialGPS.begin(9600, SERIAL_8N1, /* rxPin= */ 2, /* txPin= */ 1);
+#endif
 }
 
 void update_GPS_serial(void) {
@@ -1172,7 +1217,7 @@ void update_GPS_serial(void) {
   }
 }
 
-bool gps_active = false;
+//bool gps_active = false;
 
 bool request_RTC_sync = false;
 
@@ -1198,12 +1243,11 @@ void update_GPS(void) {
 }
 
 
-
 // ================ DS3231_emulator ================
 
 // Emit SQWV on LED pin.
-#ifdef ARDUINO_ARCH_RP2040
-#define SQWV_PIN_RP2040  25 // On-board LED on Pico
+#ifdef PICO_RP2040
+ #define SQWV_PIN_RP2040  25 // On-board LED on Pico, run in parallel.
 #endif
 #define SQWV_PIN 13
 
@@ -1801,13 +1845,13 @@ void sleep_tickle(void) {
 
 #define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
 #ifdef ARDUINO_ARCH_RP2040
-#ifdef PIN_NEOPIXEL // i.e., this is a Feather RP2040
-int button_pins[NUM_BUTTONS] = {9, 8, 7};
-#else // RP2040 Pico
-int button_pins[NUM_BUTTONS] = {18, 19, 20};
-#endif
+  #ifdef FEATHER_RP2040 // i.e., this is a Feather RP2040
+    int button_pins[NUM_BUTTONS] = {9, 8, 7};
+  #else // RP2040 Pico
+    int button_pins[NUM_BUTTONS] = {18, 19, 20};
+  #endif
 #else
-int button_pins[NUM_BUTTONS] = {9, 6, 5};
+  int button_pins[NUM_BUTTONS] = {9, 6, 5};
 #endif
 int button_state[NUM_BUTTONS] = {0, 0, 0};
 unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
@@ -1858,6 +1902,11 @@ void buttons_update(void) {
       Serial.println(" short press");
     }
     // Action - tickle the screensaver.
+    if (!display_on) {
+      sleep_tickle();  // also wakes the display.
+      // But otherwise ignore the press.
+      return;
+    }
     sleep_tickle();
     switch(button) {
       case 0:
@@ -2047,6 +2096,10 @@ void loop() {
     digitalWrite(SQWV_PIN_RP2040, HIGH);
   #endif
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
+    // Half way through second is also when we calculate and show the skew
+    if(display_on && gps_active) {
+      display_skew_us((long int)(tick_micros - gps_micros));
+    }
   }
   // If the clock ticked, set up for next second.
   if (tick_happened) {
@@ -2069,9 +2122,6 @@ void loop() {
       last_sec = now_sec;
       //update_display(dt);
       if(display_on) {
-        if(gps_active) {
-          display_skew_us((long int)(tick_micros - gps_micros));
-        }
         ds3231_display(ds3231, clock_name, gps_active);
       }
       //Serial.print("tick - gps=");
