@@ -15,7 +15,7 @@
 // Cx - Enable (x=1) / Disable (x=0) the 32 kHz output
 // D - Display all registers
 // Ex - Enable (x=1) / Disable (x=0) clock oscillator when on battery
-// Ix - Enable alarm interrupt outputs on sqwv pin (x=1) / Enable sqwv frequency output (x=0) 
+// Ix - Enable alarm interrupt outputs on sqwv pin (x=1) / Enable sqwv frequency output (x=0)
 // L - Read Alarm 1
 // Lx - Enable (x=1) / Disable (x=0) Alarm 1
 // Lss - Set Alarm 1 for every minute at seconds SS
@@ -43,22 +43,22 @@
 //  Arduino as I2C Secondary emulates behavior of DS3231 RTC
 //  including alarms and 1Hz SQWV output on SQWV_PIN
 //  but no 32 kHz output nor other SQWV frequencies.
-//  Aging is currently interpreted as ppb but limited to 
+//  Aging is currently interpreted as ppb but limited to
 //  8 bits signed, so max -128ppb/+127ppb.
 //
 //  Wiring:
 //                   RP2040 Pico     Feather RP2040  ESP32 Feather
-//  10MHz in         GP7                 GP19
-//  I2C server SDA   GP16 I2C0SDA    A4  GP24
-//  I2C server SCL   GP17 I2C0SCL    A5  GP25
-//  RTC PPS out      GP13            D13 GP13
-//  GPS PPS in       GP8             A2  GP28
-//  GPS Serial in    GP5  UART1RX    RX  GP1
-//  I2C display SDA  GP2  I2C1SDA    SDA GP2
-//  I2C display SCL  GP3  I2C1SCL    SCL GP3
-//  BTN A            GP18                GP9
-//  BTN B            GP19                GP8
-//  BTN C            GP20                GP7
+//  10MHz in         GP7             D10  GP10       D10  GP10
+//  I2C server SDA   GP16 I2C0SDA    A4   GP24       A4   GP14
+//  I2C server SCL   GP17 I2C0SCL    A5   GP25       A5   GP8
+//  RTC PPS out      GP13            D13  GP13       D13  GP13
+//  GPS PPS in       GP8             A2   GP28       A2   GP16
+//  GPS Serial in    GP5  UART1RX    RX   GP1        RX   GP2
+//  I2C display SDA  GP2  I2C1SDA    SDA  GP2        (built-in)
+//  I2C display SCL  GP3  I2C1SCL    SCL  GP3        (built-in)
+//  BTN A            GP18                 GP9             GP9
+//  BTN B            GP19                 GP8             GP6
+//  BTN C            GP20                 GP7             GP5
 //
 //  DESIGN
 //
@@ -85,37 +85,37 @@
 //  dpwe@google.com 2022-12-31
 
 #include <SPI.h>
-#include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
+#include <Wire.h>  // https://www.arduino.cc/en/Reference/Wire
 
-#include <RTClib.h>         // Adafruit; defines RTC_DS3231
+#include <RTClib.h>  // Adafruit; defines RTC_DS3231
 
 #ifdef ARDUINO_ARCH_RP2040
-  #ifdef PIN_NEOPIXEL // i.e., this is a Feather RP2040
-    #define FEATHER_RP2040
-    #define FEATHER_OLED
-  #else
-    #define MY_PICO_RP2040
-  #endif
-  // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
-  // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
-  const int ext_sda_pin = 16;  // 24;
-  const int ext_scl_pin = 17;  // 25;
-  #define EXT_I2C Wire
-  const int int_sda_pin = 2;
-  const int int_scl_pin = 3;
-  #define INT_I2C Wire1
+#ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
+#define FEATHER_RP2040
+#define FEATHER_OLED
+#else
+#define MY_PICO_RP2040
+#endif
+// Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
+// must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
+const int ext_sda_pin = 16;  // 24;
+const int ext_scl_pin = 17;  // 25;
+#define EXT_I2C Wire
+const int int_sda_pin = 2;
+const int int_scl_pin = 3;
+#define INT_I2C Wire1
 
-  #define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
 
 #else
-  // ESP32-S3
-  const int ext_sda_pin = A4;
-  const int ext_scl_pin = A5;
-  #define EXT_I2C Wire1
-  #define INT_I2C Wire
+// ESP32-S3
+const int ext_sda_pin = A4;
+const int ext_scl_pin = A5;
+#define EXT_I2C Wire1
+#define INT_I2C Wire
 
-  #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
-  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+//#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
 
 #endif
 
@@ -125,94 +125,94 @@
 #include <Adafruit_GFX.h>
 
 #ifdef DISPLAY_SSD1351
-  #include <Adafruit_SSD1351.h>
-  // Screen dimensions
-  #define SCREEN_WIDTH  128
-  #define SCREEN_HEIGHT 128 // Change this to 96 for 1.27" OLED.
-  #define SIZE_1X
+#include <Adafruit_SSD1351.h>
+// Screen dimensions
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
+#define SIZE_1X
 
-  // Hardware SPI pins 
-  // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be 
-  // an output. 
-  #define DC_PIN   4
-  #define CS_PIN   5
-  #define RST_PIN  6
-  Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
+// Hardware SPI pins
+// (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
+// an output.
+#define DC_PIN 4
+#define CS_PIN 5
+#define RST_PIN 6
+Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
 
-  // Color definitions
-  #define BLACK           0x0000
-  #define BLUE            0x001F
-  #define RED             0xF800
-  #define GREEN           0x07E0
-  #define CYAN            0x07FF
-  #define MAGENTA         0xF81F
-  #define YELLOW          0xFFE0  
-  #define WHITE           0xFFFF
+// Color definitions
+#define BLACK 0x0000
+#define BLUE 0x001F
+#define RED 0xF800
+#define GREEN 0x07E0
+#define CYAN 0x07FF
+#define MAGENTA 0xF81F
+#define YELLOW 0xFFE0
+#define WHITE 0xFFFF
 #endif
 
 #ifdef DISPLAY_ST7789
-  #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+#include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
 
-  #define SCREEN_WIDTH  240
-  #define SCREEN_HEIGHT 135 // Change this to 96 for 1.27" OLED.
-  #define SIZE_2X  // All text double-size
+#define SCREEN_WIDTH 240
+#define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
+#define SIZE_2X            // All text double-size
 
-  // Use dedicated hardware SPI pins
-  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+// Use dedicated hardware SPI pins
+Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
+const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
 
-  #define WHITE ST77XX_WHITE
-  #define BLACK ST77XX_BLACK
-  #define BLUE  ST77XX_BLUE
-  #define RED   ST77XX_RED
-  #define GREEN ST77XX_GREEN
-  #define CYAN  ST77XX_CYAN
-  #define MAGENTA ST77XX_MAGENTA
-  #define YELLOW  ST77XX_YELLOW 
+#define WHITE ST77XX_WHITE
+#define BLACK ST77XX_BLACK
+#define BLUE ST77XX_BLUE
+#define RED ST77XX_RED
+#define GREEN ST77XX_GREEN
+#define CYAN ST77XX_CYAN
+#define MAGENTA ST77XX_MAGENTA
+#define YELLOW ST77XX_YELLOW
 
 #endif
 
 #ifdef DISPLAY_SH1107
-  #include <Adafruit_SH110X.h>
+#include <Adafruit_SH110X.h>
 
-  #ifdef FEATHER_OLED
-    const int display_address = 0x3C;
-    #define SCREEN_HEIGHT 64
-  #else // standalone OLED
-    const int display_address = 0x3D;
-    #define SCREEN_HEIGHT 128
-  #endif
+#ifdef FEATHER_OLED
+const int display_address = 0x3C;
+#define SCREEN_HEIGHT 64
+#else  // standalone OLED
+const int display_address = 0x3D;
+#define SCREEN_HEIGHT 128
+#endif
 
-  #define SCREEN_WIDTH  128
-  #define SIZE_1X
+#define SCREEN_WIDTH 128
+#define SIZE_1X
 
-  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
+Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
 
-  // Monochrome, all colors are white
-  #define WHITE SH110X_WHITE
-  #define BLACK SH110X_BLACK
-  #define BLUE  WHITE
-  #define RED   WHITE
-  #define GREEN WHITE
-  #define CYAN  WHITE
-  #define MAGENTA WHITE
-  #define YELLOW  WHITE 
+// Monochrome, all colors are white
+#define WHITE SH110X_WHITE
+#define BLACK SH110X_BLACK
+#define BLUE WHITE
+#define RED WHITE
+#define GREEN WHITE
+#define CYAN WHITE
+#define MAGENTA WHITE
+#define YELLOW WHITE
 
 #endif
 
 #ifdef SIZE_1X
-  // 1x size
-  #define SMALL_SIZE 1
-  #define LARGE_SIZE 2
-  #define ROW_H 8
-  #define CHAR_W 6
+// 1x size
+#define SMALL_SIZE 1
+#define LARGE_SIZE 2
+#define ROW_H 8
+#define CHAR_W 6
 #else
-  // 2x size
-  #define SMALL_SIZE 2
-  #define LARGE_SIZE 4
-  #define ROW_H 16
-  #define CHAR_W 12
+// 2x size
+#define SMALL_SIZE 2
+#define LARGE_SIZE 4
+#define ROW_H 16
+#define CHAR_W 12
 #endif
 
 void setup_display(void) {
@@ -224,7 +224,7 @@ void setup_display(void) {
   pinMode(TFT_BACKLITE, OUTPUT);
   analogWrite(TFT_BACKLITE, 128);
 
-  display.init(135, 240); // Init ST7789 240x135
+  display.init(135, 240);  // Init ST7789 240x135
   display.setRotation(3);
 #endif
 #ifdef DISPLAY_SH1107
@@ -238,19 +238,19 @@ void setup_display(void) {
 
   display.fillScreen(BLACK);
 
-  // text display 
+  // text display
   display.setTextSize(1);
   display.setTextColor(WHITE);
-  display.setCursor(0,0);
+  display.setCursor(0, 0);
   display.print("DS3231_emu_exp");
 }
 
 // ------ DS3231 internal status display ------
 
-const char *CONTROL_SHORTNAMES[8] = {"E", "Q", "C", "R", "R", "I", "E", "E"};
-const char *STATUS_SHORTNAMES[8]  = {"O", "x", "x", "x", "3", "B", "F", "F"};
+const char *CONTROL_SHORTNAMES[8] = { "E", "Q", "C", "R", "R", "I", "E", "E" };
+const char *STATUS_SHORTNAMES[8] = { "O", "x", "x", "x", "3", "B", "F", "F" };
 
-void print_bits_tft(uint16_t x, uint16_t y, uint8_t val, const char* names[8], uint16_t fgcolor=WHITE, uint16_t bgcolor=BLACK) {
+void print_bits_tft(uint16_t x, uint16_t y, uint8_t val, const char *names[8], uint16_t fgcolor = WHITE, uint16_t bgcolor = BLACK) {
   // Print a bit set using an array of names.
   uint8_t mask = 0x80;  // Start with top bit.
   display.setTextColor(fgcolor, bgcolor);
@@ -258,7 +258,7 @@ void print_bits_tft(uint16_t x, uint16_t y, uint8_t val, const char* names[8], u
   for (uint8_t bit = 0; bit < 8; ++bit) {
     bool bitval = ((val & mask) > 0);
     // "Set" bits are printed in reverse video.
-    if (bitval)   display.setTextColor(bgcolor, fgcolor);
+    if (bitval) display.setTextColor(bgcolor, fgcolor);
     display.print(names[bit]);
     uint16_t w = strlen(names[bit]) * CHAR_W;
     if (bitval) {
@@ -312,7 +312,7 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
   }
 }
 
-void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name, bool gps_active) {
+void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_active) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
   // HHHH::MMMM::SSSS (double-size)
@@ -331,11 +331,11 @@ void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name, bool gps_a
   // Clock source identifier tag
   display.setTextSize(SMALL_SIZE);
   display.setTextColor(RED, BLACK);
-  display.setCursor(18 * CHAR_W, 0);
+  display.setCursor(17 * CHAR_W, 0);
   display.print(clock_name);
 
   // GPS status
-  display.setCursor(18 * CHAR_W, ROW_H);
+  display.setCursor(17 * CHAR_W, ROW_H);
   if (gps_active) {
     display.setTextColor(BLACK, GREEN);
     display.print("GPS");
@@ -365,7 +365,7 @@ void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name, bool gps_a
   display.setTextColor(CYAN, BLACK);
   display.setCursor(0, 3 * ROW_H);
   strcpy(s, "A1: ");
-  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm1Mode(), /* alarm_num */ 1);  
+  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm1Mode(), /* alarm_num */ 1);
   ds3231.getAlarm1().toString(s);
   display.print(s);
 
@@ -373,7 +373,7 @@ void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name, bool gps_a
   display.setTextColor(BLUE, BLACK);
   display.setCursor(0, 4 * ROW_H);
   strcpy(s, "A2: ");
-  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm2Mode(), /* alarm_num */ 2);  
+  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm2Mode(), /* alarm_num */ 2);
   ds3231.getAlarm2().toString(s);
   display.print(s);
 
@@ -407,7 +407,7 @@ void ds3231_display(class RTC_DS3231& ds3231, const char *clock_name, bool gps_a
   itoa(int(t), s + 2, 10);
   char *s_end = s + strlen(s);
   *s_end = '.';
-  itoa(100*(t - int(t)), s_end + 1, 10);
+  itoa(100 * (t - int(t)), s_end + 1, 10);
   display.print(s);
   display.print("   ");
 
@@ -422,8 +422,8 @@ bool gps_active = false;
 
 void display_skew_us(long int skew_microseconds) {
   Serial.print("display_skew_us=");
-  Serial.println(skew_microseconds);  
-  char s[5]; // "-0.0\0"
+  Serial.println(skew_microseconds);
+  char s[5];  // "-0.0\0"
   long int skew_milliseconds;
   if (skew_microseconds < 0L) {
     s[0] = '-';
@@ -442,34 +442,40 @@ void display_skew_us(long int skew_microseconds) {
   } else {
     // format as +/-0.1
     // Round up
-    skew_microseconds += 50L; // rounding
+    skew_microseconds += 50L;  // rounding
     skew_milliseconds = skew_microseconds / 1000L;
     s[1] = '0' + skew_milliseconds;
     s[2] = '.';
     s[3] = '0' + ((skew_microseconds / 100L) - (10 * skew_milliseconds));
   }
-  if (s[2] == '\0')  { s[2] = ' '; s[3] = '\0'; }
-  if (s[3] == '\0')  { s[3] = ' '; s[4] = '\0'; }
+  if (s[2] == '\0') {
+    s[2] = ' ';
+    s[3] = '\0';
+  }
+  if (s[3] == '\0') {
+    s[3] = ' ';
+    s[4] = '\0';
+  }
   s[4] = '\0';
   // Now actually display it.
   display.setTextColor(RED, BLACK);
-  display.setCursor(17 * CHAR_W, 2 * ROW_H);
-  if (gps_active)  display.print(s);
-  else             display.print("    ");
+  display.setCursor(16 * CHAR_W, 2 * ROW_H);
+  if (gps_active) display.print(s);
+  else display.print("    ");
 }
 
 // -------------- Time --------------------
 
 #define CLOCK_ADDRESS 0x68
 
-#define DS3231_TIME 0x00      ///< Time register
-#define DS3231_ALARM1 0x07    ///< Alarm 1 register
-#define DS3231_ALARM2 0x0B    ///< Alarm 2 register
-#define DS3231_CONTROL 0x0E   ///< Control register
-#define DS3231_STATUSREG 0x0F ///< Status register
-#define DS3231_AGING 0x10     ///< Aging offset register
-#define DS3231_TEMPERATUREREG 0x11 ///< Temperature register (high byte - low byte is at 0x12), 10-bit
-                              ///< temperature value
+#define DS3231_TIME 0x00            ///< Time register
+#define DS3231_ALARM1 0x07          ///< Alarm 1 register
+#define DS3231_ALARM2 0x0B          ///< Alarm 2 register
+#define DS3231_CONTROL 0x0E         ///< Control register
+#define DS3231_STATUSREG 0x0F       ///< Status register
+#define DS3231_AGING 0x10           ///< Aging offset register
+#define DS3231_TEMPERATUREREG 0x11  ///< Temperature register (high byte - low byte is at 0x12), 10-bit
+                                    ///< temperature value
 
 #define time_t uint32_t
 
@@ -488,15 +494,16 @@ void serial_print_time(const DateTime &dt) {
 }
 
 // getExternalTime is declared to expect a function returning a (signed) long int.
-//time_t 
+//time_t
 #ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
 long
 #endif
-long int RTC_utc_get(void) {
+  long int
+  RTC_utc_get(void) {
   return ds3231.now().unixtime();
 }
 
-void RTC_set_time(const DateTime& dt) {
+void RTC_set_time(const DateTime &dt) {
   // Set the DS3231 time.
   Serial.print("Set RTC: ");
   serial_print_time(dt);
@@ -507,22 +514,21 @@ void RTC_set_time(const DateTime& dt) {
 
 // ---- Misc formatting -----
 
-void print2Digits(int digits, int base=10)
-{
+void print2Digits(int digits, int base = 10) {
   // Print a 2-digit value with a leading zero if needed.
-  if(digits < base)
+  if (digits < base)
     Serial.print('0');
   Serial.print(digits, base);
 }
 
-void itoa2(int num, char *s, int base=10) {
+void itoa2(int num, char *s, int base = 10) {
 #define DTOA(d) ((d < 10) ? ('0' + d) : ('A' + d - 10))
   *s++ = DTOA(num / base);
   *s++ = DTOA(num % base);
   *s++ = '\0';
 }
 
-void sprint_bits(uint8_t val, const char* names[8], char *s) {
+void sprint_bits(uint8_t val, const char *names[8], char *s) {
   // Print a bit set using an array of names.
   uint8_t mask = 0x80;  // Actually start with top bit.
   for (uint8_t bit = 0; bit < 8; ++bit) {
@@ -537,7 +543,7 @@ void sprint_bits(uint8_t val, const char* names[8], char *s) {
   }
 }
 
-void print_bits(uint8_t val, const char* names[8]) {
+void print_bits(uint8_t val, const char *names[8]) {
   // Print bits.  Special case for to_display.
   char s[70];
   sprint_bits(val, names, s);
@@ -546,21 +552,21 @@ void print_bits(uint8_t val, const char* names[8]) {
 
 // ----- Encode/decode DS3231 registers ---------
 
-#define BCDTODEC(x) ((x) - 6 * ((x) >> 4))
+#define BCDTODEC(x) ((x)-6 * ((x) >> 4))
 
 DateTime ds3231_regs_to_datetime(uint8_t *regs) {
   // Format the 7 byte DS3231 time registers to a DateTime obj.
   uint8_t secs = BCDTODEC(regs[0]);
   uint8_t mins = BCDTODEC(regs[1]);
   uint8_t hours = BCDTODEC(regs[2]);
-  uint8_t dow = BCDTODEC(regs[3]);  // 1-7.
-  uint8_t day = BCDTODEC(regs[4]);  // 1-31
+  uint8_t dow = BCDTODEC(regs[3]);           // 1-7.
+  uint8_t day = BCDTODEC(regs[4]);           // 1-31
   uint8_t month = BCDTODEC(regs[5] & 0x7F);  // 1-12
   uint16_t year = 2000 + ((regs[5] & 0x80) ? 100 : 0) + BCDTODEC(regs[6]);
   return DateTime(year, month, day, hours, mins, secs);
 }
 
-void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
+void sprint_alarm(uint8_t *regs, char *s, bool has_secs = true) {
   // Format the status of alarm from the 4 bytes (0 + 3 bytes for Alarm 2).
   int8_t secs = 0;
   int8_t mode = 0;
@@ -598,7 +604,7 @@ void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
         s += strlen(s);
         days %= 7;  // Ensure 0 (Sun) to 6 (Sat).
         for (int i = 0; i < 3; ++i) {
-          s[i] = dow[3*days + i];
+          s[i] = dow[3 * days + i];
         }
         s[3] = '\0';
         s += strlen(s);
@@ -615,56 +621,56 @@ void sprint_alarm(uint8_t *regs, char *s, bool has_secs=true) {
     default:
       Serial.print("Invalid Alarm mode 0x");
       Serial.println(mode, HEX);
-      break;      
-    }
-    s += strlen(s);
-    // Print the actual time.
-    switch (mode) {
-      case 0x0:
-      case 0x8:
-        // Print hours.
-        itoa2(hours, s);
-        s += strlen(s);
-        // Fall through.
-      case 0xC:
-        // Print mins.
-        *s++ = ':';
-        itoa2(mins, s);
-        s += strlen(s);
-        // Fall through.
-      case 0xE:
-        // Print secs.
-        *s++ = ':';
-        itoa2(secs, s);
-        s += strlen(s);
-        break;
-      default:
-        break;
-    }
+      break;
+  }
+  s += strlen(s);
+  // Print the actual time.
+  switch (mode) {
+    case 0x0:
+    case 0x8:
+      // Print hours.
+      itoa2(hours, s);
+      s += strlen(s);
+      // Fall through.
+    case 0xC:
+      // Print mins.
+      *s++ = ':';
+      itoa2(mins, s);
+      s += strlen(s);
+      // Fall through.
+    case 0xE:
+      // Print secs.
+      *s++ = ':';
+      itoa2(secs, s);
+      s += strlen(s);
+      break;
+    default:
+      break;
+  }
 }
 
 void print_registers(uint8_t *registers) {
   // Display all 19 hex registers.
   Serial.print("Regs: ");
   for (int i = 0; i < 19; ++i) {
-    if (registers[i] < 16)  Serial.print("0");
+    if (registers[i] < 16) Serial.print("0");
     Serial.print(registers[i], HEX);
     Serial.print(" ");
   }
   Serial.println("");
 }
 
-const char *CONTROL_NAMES[8] = {"#EO", "BSQ", "CNV", "RS2", "RS1", "INT", "A2E", "A1E"};
-const char *STATUS_NAMES[8]  = {"OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F"};
+const char *CONTROL_NAMES[8] = { "#EO", "BSQ", "CNV", "RS2", "RS1", "INT", "A2E", "A1E" };
+const char *STATUS_NAMES[8] = { "OSF", " x ", " x ", " x ", "EN3", "BSY", "A2F", "A1F" };
 
 void print_registers_fancy(uint8_t *registers) {
   // Decode the entire state of the DS3231 to the terminal.
   // registers[19] is return from ds3231.getRegisters().
-  
+
   // Print date/time.
   char s[70];  // Needed for longest sprint_bits.
   Serial.print("Time:");
-  for (int i=0; i < 7; ++i) {
+  for (int i = 0; i < 7; ++i) {
     Serial.print(' ');
     print2Digits(registers[i], 16);
   }
@@ -684,14 +690,14 @@ void print_registers_fancy(uint8_t *registers) {
   sprint_alarm(registers + 7, s);
   Serial.print(":   ");
   Serial.println(s);
- 
+
   Serial.print("Alarm2:          ");
   for (int i = 11; i < 14; ++i) {
     Serial.print(' ');
     print2Digits(registers[i], 16);
   }
   // Format Alarm2 (no seconds register).
-  sprint_alarm(registers + 11, s, /* has seconds= */false);
+  sprint_alarm(registers + 11, s, /* has seconds= */ false);
   Serial.print(":   ");
   Serial.println(s);
 
@@ -754,7 +760,7 @@ bool atob(char *s) {
 uint32_t htoi(char *s) {
   // Convert hex string to unsigned long int.
   uint32_t val = 0;
-  while(*s) {
+  while (*s) {
     uint8_t v = (*s) - '0';
     if (v > 9) v -= 'A' - '0' + 10;
     if (v > 15) v -= 'a' - 'A';
@@ -781,9 +787,9 @@ DateTime parse_time_string(char *time_string) {
   if (time_string[0] != '2' or time_string[1] != '0') {
     Serial.println("Warn: Year does not start with 20...");
   }
-  // YYYY, MM, DD, 
+  // YYYY, MM, DD,
   // hh, mm, ss
-  return DateTime(2000 + atoi2(time_string + 2), atoi2(time_string + 4), atoi2(time_string + 6), 
+  return DateTime(2000 + atoi2(time_string + 2), atoi2(time_string + 4), atoi2(time_string + 6),
                   atoi2(time_string + 8), atoi2(time_string + 10), atoi2(time_string + 12));
 }
 
@@ -794,7 +800,7 @@ void print_enabled_disabled(const char *s, int v) {
   else Serial.println("enabled.");
 }
 
-DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm=1) {
+DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm = 1) {
   // hhmmss at the end of the arg.
   uint8_t ix = strlen(arg);
   uint8_t day = 1;
@@ -821,7 +827,7 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm=1) {
   if (ix == 1) {
     // Weekday.
     daynotdate = true;
-    day = 1 + (arg[ix - 1] - '0' + 6) % 7;   // 1 (Mon) .. 7 (Sun).
+    day = 1 + (arg[ix - 1] - '0' + 6) % 7;  // 1 (Mon) .. 7 (Sun).
     mode = DS3231_A1_Day;
   } else if (ix == 2) {
     // Day of month
@@ -846,205 +852,206 @@ void cmd_prompt() {
 }
 
 // Macro to set or clear bits specified by bitmask in a register.
-#define SET_BIT_IN_REG_TO(reg, bitmask, val)  if (val) reg |= (bitmask); else reg &= ~(bitmask);
+#define SET_BIT_IN_REG_TO(reg, bitmask, val) \
+  if (val) reg |= (bitmask); \
+  else reg &= ~(bitmask);
 
-const int16_t ds3231_freqs[4] = {1, 1024, 4096, 8192};
+const int16_t ds3231_freqs[4] = { 1, 1024, 4096, 8192 };
 
-void handle_cmd(char cmd, char * arg) {
+void handle_cmd(char cmd, char *arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
   // Number of characters in argument.
   uint8_t ctrl, status;  // In case we need them.
-  bool b; // In case we need it.
-  int value; // In case we need it.
-  DateTime dt; // In case we need it.
-  char s[64]; // In case we need it.
-  uint8_t regs[19];  // In case we need it.
+  bool b;                // In case we need it.
+  int value;             // In case we need it.
+  DateTime dt;           // In case we need it.
+  char s[64];            // In case we need it.
+  uint8_t regs[19];      // In case we need it.
   int alen = strlen(arg);
   switch (cmd) {
-    
-   case 'A':
-    // Get/set aging offset.
-    if (alen) {
-      value = atoi(arg);
-      ds3231.setAging(value);
-    }
-    Serial.print("Aging offset=");
-    Serial.println((int8_t)ds3231.getAging());
-    break;
-    
-   case 'B':
-    // Enable/disable battery square wave output (bit 6 of CONTROL).
-    ctrl = ds3231.getControlReg();
-    if (alen) {
-      SET_BIT_IN_REG_TO(ctrl, 0x40, atob(arg));
-      ds3231.setControlReg(ctrl);
-    }
-    print_enabled_disabled("BBSQWV", ctrl & 0x40);
-    break;
-    
-   case 'C':
-    // Enable/disable 32 kHz output (bit 3 of STATUS).
-    status = ds3231.getStatusReg();
-    if (alen) {
-      SET_BIT_IN_REG_TO(status, 0x08, atob(arg));
-      ds3231.setStatusReg(status);
-    }
-    print_enabled_disabled("32 kHz output", status & 0x08);
-    break;
-    
-   case 'D':
-    // Display all registers
-    uint8_t registers[19];
-    ds3231.getRegisters(registers, 19);
-    print_registers_fancy(registers);
-    break;
-    
-   case 'E':
-    // Enable/disable master oscillator (not bit 7 of CONTROL).
-    ctrl = ds3231.getControlReg();
-    if (alen) {
-      // The flag is actuall NOT(enable osc), so flip the value.
-      SET_BIT_IN_REG_TO(ctrl, 0x80, !atob(arg));
-      ds3231.setControlReg(ctrl);
-    }
-    print_enabled_disabled("Master osc", !(ctrl & 0x80));
-    break;
-  
-   case 'G':
-    // Print current microseconds skew vs. GPS, if any.
-    print_gps_skew();
-    break;
-    
-   case 'I':
-    // Enable alarm interrupt outputs on SQWV (bit 2 of CONTROL).
-    ctrl = ds3231.getControlReg();
-    if (alen) {
-      SET_BIT_IN_REG_TO(ctrl, 0x04, atob(arg));
-      ds3231.setControlReg(ctrl);
-    }
-    print_enabled_disabled("Alarm interrupt outputs", ctrl & 0x04);
-    break;
-    
-   case 'L':
-    // Alarm 1
-    if (alen == 1) {
-      // Alarm1 enable/disable (bit 0 of CONTROL).
-      ctrl = ds3231.getControlReg();
-      SET_BIT_IN_REG_TO(ctrl, 0x01, atob(arg));
-      ds3231.setControlReg(ctrl);
-      print_enabled_disabled("A1IE", ctrl & 0x01);
-    } else if (alen > 1) {
-      uint8_t mode;
-      dt = parse_alarm_spec(arg, &mode, /* alarm */ 1);
-      sprint_datetime(dt, s);
-      Serial.println(s);
-      // setAlarm only works when INTCN (bit 2 of control) is set.
-      ctrl = ds3231.getControlReg();
-      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl | 0x04);
-      ds3231.setAlarm1(dt, (Ds3231Alarm1Mode)mode);      
-      // Restore conv bit (if we changed it), also A1E (set by setAlarm1).
-      ds3231.setControlReg(ctrl);
-    }
-    // Read in the 4 bytes defining alarm1.
-    ds3231.getRegisters(regs, 4, DS3231_ALARM1);
-    sprint_alarm(regs, s);
-    Serial.print("Alarm 1: ");
-    Serial.println(s);
-    break;
-    
-   case 'M':
-    // Alarm 2
-    if (alen == 1) {
-      // Alarm2 enable/disable (bit 1 of CONTROL).
-      ctrl = ds3231.getControlReg();
-      SET_BIT_IN_REG_TO(ctrl, 0x02, atob(arg));
-      ds3231.setControlReg(ctrl);
-      print_enabled_disabled("A2IE", ctrl & 0x02);
-    } else if (alen > 1) {
-      uint8_t mode;
-      dt = parse_alarm_spec(arg, &mode, /* alarm */ 2);
-      sprint_datetime(dt, s);
-      Serial.println(s);
-      // setAlarm only works when INTCN (bit 2 of control) is set.
-      ctrl = ds3231.getControlReg();
-      if (!(ctrl & 0x04))  ds3231.setControlReg(ctrl | 0x04);
-      ds3231.setAlarm2(dt, (Ds3231Alarm2Mode)mode);
-      // Restore conv bit (if we changed it), also A2E (set by setAlarm2).
-      ds3231.setControlReg(ctrl);
-    }
-    // Simulate 4-byte Alarm1 registers by making first byte = 0.
-    regs[0] = 0;
-    ds3231.getRegisters(regs + 1, 3, DS3231_ALARM2);
-    sprint_alarm(regs, s);
-    Serial.print("Alarm 2: ");
-    Serial.println(s);
-    break;
 
-   case 'P':
-    // Enable/disable continuous polling of time across I2C.
-    if (alen) {
-      polling_interval = atoi(arg);
-    }
-    Serial.print("Polling interval (ms, 0=disabled)=");
-    Serial.println(polling_interval);
-    break;
-    
-   case 'Q':
-    // SQWV frequency. RS2:RS1 are CONTROL bits 4 and 3
-    ctrl = ds3231.getControlReg();
-    uint8_t rs;
-    if (alen) {
-      rs = arg[0] - '0';  // RS2:RS1
-      ctrl = (ctrl & 0xE7) | ((rs & 0x03) << 3);
-      ds3231.setControlReg(ctrl);
-    }
-    rs = (ctrl & 0x18) >> 3;
-    Serial.print("SQWV freq=");
-    Serial.println(ds3231_freqs[rs]);
-    break;
-    
-   case 'R':
-    // Reset OSF, A1F, A2F (bits 7, 1, 0 of STATUS).
-    status = ds3231.getStatusReg();
-    status &= ~0x83;
-    ds3231.setStatusReg(status);
-    Serial.println("OSF, A1F, A2F cleared.");
-    break;
-    
-   case 'S':
-    // Enable/disable read of time in response to falling edge on SQWV.
-    if (alen) {
-      enable_sqwv_int = atob(arg);
-    }
-    print_enabled_disabled("SQWV interrupt", enable_sqwv_int);
-    break;
-    
-   case 'T':
-    // Read or initiate temp read (bit 5 of CONTROL).
-    if (alen && atob(arg)) {
-      ctrl = ds3231.getControlReg();
-      ctrl |= 0x20;
-      ds3231.setControlReg(ctrl);
-      Serial.println("Temp conversion initiated.");
-    }
-    Serial.print("Temp=");
-    Serial.println(ds3231.getTemperature());
-    break;
-    
-   case 'Z':
-    // Set date/time: Z20211118094000 - 2021-11-18 09:40:00.
-    if (alen) {
-      if (alen != 14) {
-        Serial.println("Bad format - Zyyyymmddhhmmss");
-      } else {
-        dt = DateTime(parse_time_string(arg));
-        RTC_set_time(dt);
+    case 'A':
+      // Get/set aging offset.
+      if (alen) {
+        value = atoi(arg);
+        ds3231.setAging(value);
       }
-    }
-    serial_print_time(ds3231.now());
-    break;
+      Serial.print("Aging offset=");
+      Serial.println((int8_t)ds3231.getAging());
+      break;
 
-  }  
+    case 'B':
+      // Enable/disable battery square wave output (bit 6 of CONTROL).
+      ctrl = ds3231.getControlReg();
+      if (alen) {
+        SET_BIT_IN_REG_TO(ctrl, 0x40, atob(arg));
+        ds3231.setControlReg(ctrl);
+      }
+      print_enabled_disabled("BBSQWV", ctrl & 0x40);
+      break;
+
+    case 'C':
+      // Enable/disable 32 kHz output (bit 3 of STATUS).
+      status = ds3231.getStatusReg();
+      if (alen) {
+        SET_BIT_IN_REG_TO(status, 0x08, atob(arg));
+        ds3231.setStatusReg(status);
+      }
+      print_enabled_disabled("32 kHz output", status & 0x08);
+      break;
+
+    case 'D':
+      // Display all registers
+      uint8_t registers[19];
+      ds3231.getRegisters(registers, 19);
+      print_registers_fancy(registers);
+      break;
+
+    case 'E':
+      // Enable/disable master oscillator (not bit 7 of CONTROL).
+      ctrl = ds3231.getControlReg();
+      if (alen) {
+        // The flag is actuall NOT(enable osc), so flip the value.
+        SET_BIT_IN_REG_TO(ctrl, 0x80, !atob(arg));
+        ds3231.setControlReg(ctrl);
+      }
+      print_enabled_disabled("Master osc", !(ctrl & 0x80));
+      break;
+
+    case 'G':
+      // Print current microseconds skew vs. GPS, if any.
+      print_gps_skew();
+      break;
+
+    case 'I':
+      // Enable alarm interrupt outputs on SQWV (bit 2 of CONTROL).
+      ctrl = ds3231.getControlReg();
+      if (alen) {
+        SET_BIT_IN_REG_TO(ctrl, 0x04, atob(arg));
+        ds3231.setControlReg(ctrl);
+      }
+      print_enabled_disabled("Alarm interrupt outputs", ctrl & 0x04);
+      break;
+
+    case 'L':
+      // Alarm 1
+      if (alen == 1) {
+        // Alarm1 enable/disable (bit 0 of CONTROL).
+        ctrl = ds3231.getControlReg();
+        SET_BIT_IN_REG_TO(ctrl, 0x01, atob(arg));
+        ds3231.setControlReg(ctrl);
+        print_enabled_disabled("A1IE", ctrl & 0x01);
+      } else if (alen > 1) {
+        uint8_t mode;
+        dt = parse_alarm_spec(arg, &mode, /* alarm */ 1);
+        sprint_datetime(dt, s);
+        Serial.println(s);
+        // setAlarm only works when INTCN (bit 2 of control) is set.
+        ctrl = ds3231.getControlReg();
+        if (!(ctrl & 0x04)) ds3231.setControlReg(ctrl | 0x04);
+        ds3231.setAlarm1(dt, (Ds3231Alarm1Mode)mode);
+        // Restore conv bit (if we changed it), also A1E (set by setAlarm1).
+        ds3231.setControlReg(ctrl);
+      }
+      // Read in the 4 bytes defining alarm1.
+      ds3231.getRegisters(regs, 4, DS3231_ALARM1);
+      sprint_alarm(regs, s);
+      Serial.print("Alarm 1: ");
+      Serial.println(s);
+      break;
+
+    case 'M':
+      // Alarm 2
+      if (alen == 1) {
+        // Alarm2 enable/disable (bit 1 of CONTROL).
+        ctrl = ds3231.getControlReg();
+        SET_BIT_IN_REG_TO(ctrl, 0x02, atob(arg));
+        ds3231.setControlReg(ctrl);
+        print_enabled_disabled("A2IE", ctrl & 0x02);
+      } else if (alen > 1) {
+        uint8_t mode;
+        dt = parse_alarm_spec(arg, &mode, /* alarm */ 2);
+        sprint_datetime(dt, s);
+        Serial.println(s);
+        // setAlarm only works when INTCN (bit 2 of control) is set.
+        ctrl = ds3231.getControlReg();
+        if (!(ctrl & 0x04)) ds3231.setControlReg(ctrl | 0x04);
+        ds3231.setAlarm2(dt, (Ds3231Alarm2Mode)mode);
+        // Restore conv bit (if we changed it), also A2E (set by setAlarm2).
+        ds3231.setControlReg(ctrl);
+      }
+      // Simulate 4-byte Alarm1 registers by making first byte = 0.
+      regs[0] = 0;
+      ds3231.getRegisters(regs + 1, 3, DS3231_ALARM2);
+      sprint_alarm(regs, s);
+      Serial.print("Alarm 2: ");
+      Serial.println(s);
+      break;
+
+    case 'P':
+      // Enable/disable continuous polling of time across I2C.
+      if (alen) {
+        polling_interval = atoi(arg);
+      }
+      Serial.print("Polling interval (ms, 0=disabled)=");
+      Serial.println(polling_interval);
+      break;
+
+    case 'Q':
+      // SQWV frequency. RS2:RS1 are CONTROL bits 4 and 3
+      ctrl = ds3231.getControlReg();
+      uint8_t rs;
+      if (alen) {
+        rs = arg[0] - '0';  // RS2:RS1
+        ctrl = (ctrl & 0xE7) | ((rs & 0x03) << 3);
+        ds3231.setControlReg(ctrl);
+      }
+      rs = (ctrl & 0x18) >> 3;
+      Serial.print("SQWV freq=");
+      Serial.println(ds3231_freqs[rs]);
+      break;
+
+    case 'R':
+      // Reset OSF, A1F, A2F (bits 7, 1, 0 of STATUS).
+      status = ds3231.getStatusReg();
+      status &= ~0x83;
+      ds3231.setStatusReg(status);
+      Serial.println("OSF, A1F, A2F cleared.");
+      break;
+
+    case 'S':
+      // Enable/disable read of time in response to falling edge on SQWV.
+      if (alen) {
+        enable_sqwv_int = atob(arg);
+      }
+      print_enabled_disabled("SQWV interrupt", enable_sqwv_int);
+      break;
+
+    case 'T':
+      // Read or initiate temp read (bit 5 of CONTROL).
+      if (alen && atob(arg)) {
+        ctrl = ds3231.getControlReg();
+        ctrl |= 0x20;
+        ds3231.setControlReg(ctrl);
+        Serial.println("Temp conversion initiated.");
+      }
+      Serial.print("Temp=");
+      Serial.println(ds3231.getTemperature());
+      break;
+
+    case 'Z':
+      // Set date/time: Z20211118094000 - 2021-11-18 09:40:00.
+      if (alen) {
+        if (alen != 14) {
+          Serial.println("Bad format - Zyyyymmddhhmmss");
+        } else {
+          dt = DateTime(parse_time_string(arg));
+          RTC_set_time(dt);
+        }
+      }
+      serial_print_time(ds3231.now());
+      break;
+  }
 }
 
 #define CMD_BUF_LEN 32
@@ -1063,7 +1070,7 @@ void cmd_update(void) {
       cmd_buffer[cmd_len] = '\0';
       if (cmd_len > 0) {
         byte cmd0 = cmd_buffer[0];
-        if (cmd0 >= 'a')  cmd0 -= ('a' - 'A');
+        if (cmd0 >= 'a') cmd0 -= ('a' - 'A');
         handle_cmd(cmd0, cmd_buffer + 1);
         // Reprint command prompt.
         cmd_prompt();
@@ -1087,10 +1094,10 @@ void cmd_update(void) {
 //   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
 //   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
 #ifdef MY_PICO_RP2040
-  const int ppsPin = 8; // PPS output from GPS board
+const int ppsPin = 8;  // PPS output from GPS board
 #else
-  const int ppsPin = 28; // PPS output from GPS board
-  #warning "pps pin A2"
+const int ppsPin = A2;  // PPS output from GPS board
+#warning "pps pin A2"
 #endif
 
 volatile unsigned long gps_micros = 0;
@@ -1113,12 +1120,12 @@ void gpio_transition() {
 }
 
 void setup_interrupts(void) {
-    irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
-    // GPS PPS pin samples on rise.
-    gpio_set_irq_enabled(ppsPin, GPIO_IRQ_EDGE_RISE, true);
-    irq_set_enabled(IO_IRQ_BANK0, true);
+  irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
+  // GPS PPS pin samples on rise.
+  gpio_set_irq_enabled(ppsPin, GPIO_IRQ_EDGE_RISE, true);
+  irq_set_enabled(IO_IRQ_BANK0, true);
 }
-#else // !RP2040
+#else  // !RP2040
 
 // Use Arduino interrupt handler (longer latency, more portable)
 #warning "Arduino interrupts"
@@ -1136,22 +1143,22 @@ void setup_interrupts() {
 
 #define my_micros micros
 
-#endif // !RP2040
+#endif  // !RP2040
 
 // -------- GPS serial input -------
 
-#include <TinyGPS.h>       // http://arduiniana.org/libraries/TinyGPS/
+#include <TinyGPS.h>  // http://arduiniana.org/libraries/TinyGPS/
 
 // 2nd UART on Pico - RX,TX is GP5,GP4 (or GP9,GP8)
 #ifdef MY_PICO_RP2040
-  #define SerialGPS Serial2
+#define SerialGPS Serial2
 #else
-  #define SerialGPS Serial1
+#define SerialGPS Serial1
 #endif
 
 TinyGPS gps;
 
-DateTime gps_now(class TinyGPS& gps) {
+DateTime gps_now(class TinyGPS &gps) {
   unsigned long date, time, age_millis;
   gps.get_datetime(&date, &time, &age_millis);
   // We *could* add age_millis to get current time, but we really want the sync'd time from the last second.
@@ -1174,7 +1181,7 @@ DateTime gps_now(class TinyGPS& gps) {
   return DateTime(year, month, day, hour, min, sec);
 }
 
-bool gps_time_valid(class TinyGPS& gps) {
+bool gps_time_valid(class TinyGPS &gps) {
   // It's only valid if it was updated within the past second.
   unsigned long time, age_millis;
   gps.get_datetime(0, &time, &age_millis);
@@ -1198,7 +1205,12 @@ void sync_time_from_GPS(void) {
     // (potential race condition).
     // Then, we delay for most of a second to be able to anticipate the actual moment
     // so we add another second to the time we set.
-    delayMicroseconds(996950 - (my_micros() - gps_micros));
+#ifdef ARDUINO_ARCH_RP2040
+#define PREDELAY 996950
+#else
+#define PREDELAY 999600
+#endif
+    delayMicroseconds(PREDELAY - (my_micros() - gps_micros));
     last_gps_sync_unixtime = gps_now(gps).unixtime() + 2;
     RTC_set_time(DateTime(last_gps_sync_unixtime));
   }
@@ -1206,14 +1218,14 @@ void sync_time_from_GPS(void) {
 
 void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040
-  #ifdef MY_PICO_RP2040
-    // Configure Pico UART2
-    SerialGPS.setRX(5);
-    SerialGPS.setTX(4);
-  #else
-    SerialGPS.setRX(1);
-    SerialGPS.setTX(0);
-  #endif
+#ifdef MY_PICO_RP2040
+  // Configure Pico UART2
+  SerialGPS.setRX(5);
+  SerialGPS.setTX(4);
+#else
+  SerialGPS.setRX(1);
+  SerialGPS.setTX(0);
+#endif
   SerialGPS.begin(9600);
 #else
   // Feather ESP32
@@ -1234,7 +1246,7 @@ void update_GPS_serial(void) {
 bool request_RTC_sync = false;
 
 void setup_GPS(void) {
-    pinMode(ppsPin, INPUT_PULLUP); // Set alarm pin as pullup
+  pinMode(ppsPin, INPUT_PULLUP);  // Set alarm pin as pullup
 }
 
 void update_GPS(void) {
@@ -1247,7 +1259,7 @@ void update_GPS(void) {
       request_RTC_sync = false;
     }
   }
-  if((micros() - last_gps_micros) < 2000000) {
+  if ((micros() - last_gps_micros) < 2000000) {
     gps_active = true;
   } else {
     gps_active = false;
@@ -1259,7 +1271,7 @@ void update_GPS(void) {
 
 // Emit SQWV on LED pin.
 #ifdef MY_PICO_RP2040
- #define SQWV_PIN_RP2040  25 // On-board LED on Pico, run in parallel.
+#define SQWV_PIN_RP2040 25  // On-board LED on Pico, run in parallel.
 #endif
 #define SQWV_PIN 13
 
@@ -1267,20 +1279,20 @@ void update_GPS(void) {
 //#include <Wire.h>
 
 // Define minion I2C Address (matches DS3231 RTC)
-#define DS3231_ADDRESS 0x68   ///< I2C address for DS3231
-#define DS3231_TIME 0x00      ///< Time register
-#define DS3231_ALARM1 0x07    ///< Alarm 1 register
-#define DS3231_ALARM2 0x0B    ///< Alarm 2 register
-#define DS3231_CONTROL 0x0E   ///< Control register
-#define DS3231_STATUSREG 0x0F ///< Status register
-#define DS3231_AGING 0x10     ///< Aging offset register
-#define DS3231_TEMPERATUREREG                                                  \
-  0x11 ///< Temperature register (high byte - low byte is at 0x12), 10-bit
-       ///< temperature value
-#define DS3231_OUTPINSTATE    0x13 /// We use this byte to store the output pin state.  It's not in the chip.
+#define DS3231_ADDRESS 0x68    ///< I2C address for DS3231
+#define DS3231_TIME 0x00       ///< Time register
+#define DS3231_ALARM1 0x07     ///< Alarm 1 register
+#define DS3231_ALARM2 0x0B     ///< Alarm 2 register
+#define DS3231_CONTROL 0x0E    ///< Control register
+#define DS3231_STATUSREG 0x0F  ///< Status register
+#define DS3231_AGING 0x10      ///< Aging offset register
+#define DS3231_TEMPERATUREREG \
+  0x11                           ///< Temperature register (high byte - low byte is at 0x12), 10-bit \
+                                 ///< temperature value
+#define DS3231_OUTPINSTATE 0x13  /// We use this byte to store the output pin state.  It's not in the chip.
 
-#define DS3231_C_A1IE 0  // Alarm 1 Interrupt Enable is bit 0 of Control
-#define DS3231_C_A2IE 1  // Alarm 2 Interrupt Enable
+#define DS3231_C_A1IE 0   // Alarm 1 Interrupt Enable is bit 0 of Control
+#define DS3231_C_A2IE 1   // Alarm 2 Interrupt Enable
 #define DS3231_C_INTCN 2  // SQWV reflects interrupts, not oscillator
 
 #define DS3231_S_A1F 0  // Alarm 1 Fired is bit 0 of Status
@@ -1312,12 +1324,12 @@ void timer_update_trim_ppb(int ppb) {
   nanosecs_per_sec_trim = ppb;
 }
 
-#ifdef ARDUINO_ARCH_RP2040
-
 #define EXT_10MHZ_INPUT
 
 #ifdef EXT_10MHZ_INPUT
 #warning "Using EXT_10MHZ_INPUT"
+
+#ifdef ARDUINO_ARCH_RP2040
 // PPS ticks come from external 10MHz input to RP2040 (i.e., OCXO)
 // Use the PWM counter as an external-input counter.
 
@@ -1329,16 +1341,16 @@ const char *clock_name = "10M";
 // Where the frequency to count is coming in.
 // On RP2040, must be odd-numbered (PWM Chan B) pin to use PWM freq counter.
 #ifdef MY_PICO_RP2040
-  int timer_tenMHzInputPin = 7;
-  #warning "10MHz input on GP7"
+int timer_tenMHzInputPin = 7;
+#warning "10MHz input on GP7"
 #else  // FEATHER_RP2040
-  int timer_tenMHzInputPin = 19;
-  #warning "10MHz input on GP19"
+int timer_tenMHzInputPin = 10;
+#warning "10MHz input on GP10"
 #endif
 
 uint8_t timer_sliceNum = 0;
 
-uint32_t timer_count_max = 10000000; // 10 million
+uint32_t timer_count_max = 10000000;  // 10 million
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
 volatile uint32_t timer_pwmTop = (1L << 16);
@@ -1359,43 +1371,43 @@ void one_sec_callback() {
 }
 
 void timer_on_pwm_wrap() {
-    // Clear the interrupt flag that brought us here
-    pwm_clear_irq(timer_sliceNum);
-    // Wind on the underlying counter.
-    timer_count += timer_pwmTop;
+  // Clear the interrupt flag that brought us here
+  pwm_clear_irq(timer_sliceNum);
+  // Wind on the underlying counter.
+  timer_count += timer_pwmTop;
 
-    if (timer_count >= timer_count_max_this_time) {
-      one_sec_callback();
-    } else if ((timer_count_max_this_time - timer_count) < (1L << 16)) {
-      // Adjust top for last ramp.
-      timer_pwmTop = (timer_count_max_this_time - timer_count);
-      pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
-    }
+  if (timer_count >= timer_count_max_this_time) {
+    one_sec_callback();
+  } else if ((timer_count_max_this_time - timer_count) < (1L << 16)) {
+    // Adjust top for last ramp.
+    timer_pwmTop = (timer_count_max_this_time - timer_count);
+    pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+  }
 }
 
 void timer_setup_pwm_counter(uint8_t freq_pin) {
-    // Configure the PWM circuit to count pulses on freq_pin.
-    // Only the PWM B pins can be used as inputs.
-    assert(pwm_gpio_to_channel(freq_pin) == PWM_CHAN_B);
-    timer_sliceNum = pwm_gpio_to_slice_num(freq_pin);
+  // Configure the PWM circuit to count pulses on freq_pin.
+  // Only the PWM B pins can be used as inputs.
+  assert(pwm_gpio_to_channel(freq_pin) == PWM_CHAN_B);
+  timer_sliceNum = pwm_gpio_to_slice_num(freq_pin);
 
-    // Count once for every rising edge on PWM B input
-    pwm_config cfg = pwm_get_default_config();
-    pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_B_RISING);
-    pwm_config_set_clkdiv(&cfg, 1);
-    pwm_init(timer_sliceNum, &cfg, false);
-    gpio_set_function(freq_pin, GPIO_FUNC_PWM);
-    pwm_set_enabled(timer_sliceNum, true);
-    pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
-    timer_count_max_this_time = timer_count_max;
+  // Count once for every rising edge on PWM B input
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_B_RISING);
+  pwm_config_set_clkdiv(&cfg, 1);
+  pwm_init(timer_sliceNum, &cfg, false);
+  gpio_set_function(freq_pin, GPIO_FUNC_PWM);
+  pwm_set_enabled(timer_sliceNum, true);
+  pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+  timer_count_max_this_time = timer_count_max;
 
-    // Setup the wraparound interrupt.
-    // Mask our slice's IRQ output into the PWM block's single interrupt line,
-    // and register our interrupt handler
-    pwm_clear_irq(timer_sliceNum);
-    pwm_set_irq_enabled(timer_sliceNum, true);
-    irq_set_exclusive_handler(PWM_IRQ_WRAP, timer_on_pwm_wrap);
-    irq_set_enabled(PWM_IRQ_WRAP, true);
+  // Setup the wraparound interrupt.
+  // Mask our slice's IRQ output into the PWM block's single interrupt line,
+  // and register our interrupt handler
+  pwm_clear_irq(timer_sliceNum);
+  pwm_set_irq_enabled(timer_sliceNum, true);
+  irq_set_exclusive_handler(PWM_IRQ_WRAP, timer_on_pwm_wrap);
+  irq_set_enabled(PWM_IRQ_WRAP, true);
 }
 
 void timer_setup(void) {
@@ -1409,8 +1421,120 @@ void timer_reset_sync(void) {
   pwm_set_counter(timer_sliceNum, 0);
 }
 
-#else // !EXT_10MHZ_INPUT - use RP2040 built-in timer
+#else  // !RP2040 - use ESP32 PCNT
 
+#ifdef ESP32
+
+// ESP32_FreqCount
+// from https://github.com/kapraran/FreqCountESP/blob/master/src/FreqCountESP.cpp
+extern "C" {
+#include "soc/pcnt_struct.h"
+}
+#include <driver/pcnt.h>
+
+volatile uint32_t sLastPcnt = 0;
+
+//#define PCNT_HIGH_LIMIT 32767  // largest +ve value for int16_t.
+#define PCNT_HIGH_LIMIT 25000  // largest +ve value for int16_t.
+#define PCNT_LOW_LIMIT 0
+
+#define PCNT_UNIT PCNT_UNIT_0
+#define PCNT_CHANNEL PCNT_CHANNEL_0
+
+uint32_t timer_count_max = 10000000;  // 10 million
+volatile uint32_t timer_count_max_this_time = 0;
+volatile uint32_t timer_count = 0;
+volatile uint32_t timer_pwmTop = PCNT_HIGH_LIMIT;
+
+
+void pcnt_set_hilimit(int val) {
+  //pcnt_config_t unit_config = {
+  //  .high_limit = val,
+  //  .low_limit = 0,
+  //};
+  //pcnt_unit_handle_t pcnt_unit = NULL;
+  //pcnt_unit_config(&unit_config, &pcnt_unit);
+}
+
+void one_sec_callback() {
+  // Make the callback to the RTC simulator.
+  clock_tick();
+  // Setup for next alarm, including cumulated nanos.
+  timer_count -= timer_count_max_this_time;  // Should give zero.
+  // Figure fine-tuning.
+  cumulated_nanos += nanosecs_per_sec_trim;
+  int centinanos_offset = cumulated_nanos / 100;
+  cumulated_nanos -= centinanos_offset * 100;
+  timer_count_max_this_time = timer_count_max + centinanos_offset;
+  // Return to full-scale wrapping.
+  timer_pwmTop = PCNT_HIGH_LIMIT;
+  pcnt_set_hilimit(timer_pwmTop - 1);
+}
+
+portMUX_TYPE pcntMux = portMUX_INITIALIZER_UNLOCKED;
+
+static void IRAM_ATTR onHLim(void *backupCounter) {
+  // 16 bit pulse counter hit high limit; increment the 32 bit backup.
+  portENTER_CRITICAL_ISR(&pcntMux);
+  PCNT.int_clr.val = BIT(PCNT_UNIT);  // Clear the interrupt.
+  timer_count += timer_pwmTop;
+  if (timer_count >= timer_count_max_this_time) {
+    one_sec_callback();
+  } else if ((timer_count_max_this_time - timer_count) < PCNT_HIGH_LIMIT) {
+    // Adjust top for last ramp.
+    timer_pwmTop = (timer_count_max_this_time - timer_count);
+    pcnt_set_hilimit(timer_pwmTop - 1);
+  }
+  portEXIT_CRITICAL_ISR(&pcntMux);
+}
+
+const char *clock_name = "10M";
+
+// Where the frequency to count is coming in.
+int timer_tenMHzInputPin = 10;  // GP10 on ESP32
+#warning "10MHz input on D10"
+
+static void setupPcnt(uint8_t pin) {
+  pcnt_config_t pcntConfig = {
+    .pulse_gpio_num = pin,
+    .ctrl_gpio_num = -1,
+    .pos_mode = PCNT_CHANNEL_EDGE_ACTION_INCREASE,
+    .neg_mode = PCNT_CHANNEL_EDGE_ACTION_HOLD,
+    .counter_h_lim = PCNT_HIGH_LIMIT,
+    .counter_l_lim = PCNT_LOW_LIMIT,
+    .unit = PCNT_UNIT,
+    .channel = PCNT_CHANNEL,
+  };
+  pcnt_unit_config(&pcntConfig);
+  pcnt_counter_pause(PCNT_UNIT);
+  pcnt_counter_clear(PCNT_UNIT);
+  pcnt_event_enable(PCNT_UNIT, PCNT_EVT_H_LIM);  // Interrupt on high limit.
+  pcnt_isr_handle_t isrHandle;
+  pcnt_isr_register(onHLim, NULL, 0, &isrHandle);
+  pcnt_intr_enable(PCNT_UNIT);
+  pcnt_counter_resume(PCNT_UNIT);
+}
+
+void timer_setup(void) {
+  // Configure counting on frequency input pin.
+  // Setup regular timer interrupt.
+  setupPcnt(timer_tenMHzInputPin);
+}
+
+void timer_reset_sync(void) {
+  // Happens e.g. when seconds register is written.  Make seconds happen relative to now.
+  pcnt_counter_pause(PCNT_UNIT);
+  timer_count = 0;
+  pcnt_counter_clear(PCNT_UNIT);
+  pcnt_counter_resume(PCNT_UNIT);
+}
+
+#endif // ESP32
+#endif // !RP2040
+
+#else  // internal clocking.
+
+#ifdef ARDUINO_ARCH_RP2040
 const char *clock_name = "RP2";
 
 static bool _repeating_timer_callback(struct repeating_timer *t) {
@@ -1438,48 +1562,16 @@ void timer_reset_sync(void) {
   timer_setup();
 }
 
-#endif  // !EXT_10MHZ_INPUT
-
-#endif  // RP2040
+#else  // !RP2040
 
 #ifdef ESP32
+// ESP32 periodic timer
 
-const char *clock_name = "E32";
+#endif  // ESP32
+#endif  // !RP2040
 
-hw_timer_t * timer = NULL;
+#endif  // !EXT_10MHZ_INPUT
 
-void ARDUINO_ISR_ATTR onTimer(){
-  clock_tick();
-  // Setup for next alarm, including cumulated nanos.
-  cumulated_nanos += nanosecs_per_sec_trim;
-  int micros_offset = cumulated_nanos / 1000;
-  cumulated_nanos -= micros_offset * 1000;
-  timerAlarmWrite(timer, tick_period_us + micros_offset, true);
-}
-
-void timer_setup(void) {
-  // After https://espressif-docs.readthedocs-hosted.com/projects/arduino-esp32/en/latest/api/timer.html
-  // Use 1st timer of 4 (counted from zero).
-  // Set 80 divider for prescaler to get 1us events.
-  timer = timerBegin(0, 80, true);
-
-  // Attach onTimer function to our timer.
-  timerAttachInterrupt(timer, &onTimer, true);
-
-  // Set alarm to call onTimer function every second (value in microseconds).
-  // Repeat the alarm (third parameter)
-  timerAlarmWrite(timer, tick_period_us, true);
-
-  // Start an alarm
-  timerAlarmEnable(timer);
-}
-
-void timer_reset_sync(void) {
-  // Happens e.g. when seconds register is written.  Make seconds happen relative to now.
-  timerWrite(timer, 0);
-}
-
-#endif // ESP32
 
 // ----- Temperature sensor -----
 
@@ -1515,7 +1607,7 @@ int temperature_get(void) {
   return 1749 - ((15 * adc_read()) >> 3);
 }
 
-#else // !RP2040
+#else  // !RP2040
 
 #ifdef ESP32
 // EPS32 onboard temp sensor
@@ -1541,8 +1633,8 @@ int temperature_get(void) {
     tsens_value = temperatureRead();
     return (int)(round( 4 * tsens_value));
 }
-    
-#else // !ESP32
+
+#else  // !ESP32
 
 void temperature_setup(void) {
   // nothing.
@@ -1554,8 +1646,8 @@ int temperature_get(void) {
   return (4* 25);
 }
 
-#endif  // !ESP32
-#endif  // !RP2040
+#endif               // !ESP32
+#endif               // !RP2040
 
 // ----- DS3231 emulation -----
 #include "RTClib.h"  // For DateTime etc.
@@ -1783,9 +1875,9 @@ void clock_tick(void) {
   registers_next = tmp;
   // Update the output pin.
   digitalWrite(SQWV_PIN, registers[DS3231_OUTPINSTATE]);
-  #ifdef SQWV_PIN_RP2040
+#ifdef SQWV_PIN_RP2040
   digitalWrite(SQWV_PIN_RP2040, registers[DS3231_OUTPINSTATE]);
-  #endif
+#endif
 
   if (!CHECK_BIT(registers[DS3231_CONTROL], DS3231_C_INTCN)) {
     // Set up semaphore for the oscillator pulse to be reset later.
@@ -1862,14 +1954,14 @@ void sleep_tickle(void) {
 // =========== Button management ==============
 // ======================================================
 
-#define NUM_BUTTONS 3   // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
+#define NUM_BUTTONS 3  // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
 #ifdef ARDUINO_ARCH_RP2040
-  #ifdef FEATHER_RP2040 // i.e., this is a Feather RP2040
+#ifdef FEATHER_RP2040  // i.e., this is a Feather RP2040
     int button_pins[NUM_BUTTONS] = {9, 8, 7};
-    #warning "Feather RP2040"
-  #else // RP2040 Pico
+#warning "Feather RP2040"
+#else  // RP2040 Pico
     int button_pins[NUM_BUTTONS] = {18, 19, 20};
-  #endif
+#endif
 #else
   int button_pins[NUM_BUTTONS] = {9, 6, 5};
 #endif
@@ -2056,7 +2148,7 @@ void setup()
   EXT_I2C.setSCL(ext_scl_pin);
   EXT_I2C.begin(DS3231_ADDRESS);
 #else  // ESP32/ATmeta
-  #define I2C_FREQ 100000
+#define I2C_FREQ 100000
   EXT_I2C.begin(DS3231_ADDRESS, ext_sda_pin, ext_scl_pin, I2C_FREQ);
 #endif
   // Function to run when data requested from master
@@ -2080,22 +2172,31 @@ void setup()
   Serial.println(__TIME__);
 
   INT_I2C.begin();
+  Serial.println("about to setup_display...");
   setup_display();
 
   // GPS input
+  Serial.println("about to setup_GPS_serial...");
   setup_GPS_serial();
+  Serial.println("about to setup_interrupts...");
   setup_interrupts();
 
   // Setup ds3231 to use accessor functions instead of reading across I2C.
+  Serial.println("about to begin_ds3231...");
   ds3231.begin(&read_registers_fn, &write_registers_fn);
 
   // Emulator setup
+  Serial.println("about to ds3231_setup...");
   ds3231_setup();
+  Serial.println("about to timer_setup...");
   timer_setup();
+  Serial.println("about to temperature_setup...");
   temperature_setup();
 
   // Explorer setup
+  Serial.println("about to cmd_setup...");
   cmd_setup();
+  Serial.println("about to buttons_setup...");
   buttons_setup();
 }
 
@@ -2111,10 +2212,10 @@ void loop() {
   // Do we need to reset the SQWV output 1Hz low pulse?
   if (last_sqwv_millis && (now_millis - last_sqwv_millis) >= sqwv_pulse_ms) {
     digitalWrite(SQWV_PIN, HIGH);
-  #ifdef SQWV_PIN_RP2040
+#ifdef SQWV_PIN_RP2040
     // 2nd pin mirrors SQWV.
     digitalWrite(SQWV_PIN_RP2040, HIGH);
-  #endif
+#endif
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
     // Half way through second is also when we calculate and show the skew
     if(display_on && gps_active) {
