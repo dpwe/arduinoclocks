@@ -48,7 +48,7 @@
 //
 //  Wiring:
 //                   RP2040 Pico     Feather RP2040  ESP32 Feather
-//  10MHz in         GP7             D10  GP10       D10  GP10
+//  10MHz in         GP7             D11  GP11       D11  GP11
 //  I2C server SDA   GP16 I2C0SDA    A4   GP24       A4   GP14
 //  I2C server SCL   GP17 I2C0SCL    A5   GP25       A5   GP8
 //  RTC PPS out      GP13            D13  GP13       D13  GP13
@@ -98,8 +98,13 @@
 #endif
 // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
 // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
-const int ext_sda_pin = 16;  // 24;
-const int ext_scl_pin = 17;  // 25;
+#ifdef MY_PICO_RP2040
+  const int ext_sda_pin = 16;
+  const int ext_scl_pin = 17;
+#else  // FEATHER_RP2040
+  const int ext_sda_pin = 24;  // A4;
+  const int ext_scl_pin = 25;  // A5;
+#endif  
 #define EXT_I2C Wire
 const int int_sda_pin = 2;
 const int int_scl_pin = 3;
@@ -1094,15 +1099,17 @@ void cmd_update(void) {
 //   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
 //   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
 #ifdef MY_PICO_RP2040
-const int ppsPin = 8;  // PPS output from GPS board
+  const int ppsPin = 8;  // PPS output from GPS board
+  #warning "pps pin GP8"
 #else
-const int ppsPin = A2;  // PPS output from GPS board
-#warning "pps pin A2"
+  const int ppsPin = A2;  // PPS output from GPS board
+  #warning "pps pin A2"
 #endif
 
 volatile unsigned long gps_micros = 0;
 
-#ifdef ARDUINO_ARCH_RP2040
+//#ifdef ARDUINO_ARCH_RP2040
+#ifdef MY_PICO_RP2040
 
 #warning "RP2040 interrupts"
 
@@ -1341,11 +1348,11 @@ const char *clock_name = "10M";
 // Where the frequency to count is coming in.
 // On RP2040, must be odd-numbered (PWM Chan B) pin to use PWM freq counter.
 #ifdef MY_PICO_RP2040
-int timer_tenMHzInputPin = 7;
-#warning "10MHz input on GP7"
+  int timer_tenMHzInputPin = 7;   // MUST BE ODD for RP2040
+  #warning "10MHz input on GP7"
 #else  // FEATHER_RP2040
-int timer_tenMHzInputPin = 10;
-#warning "10MHz input on GP10"
+  int timer_tenMHzInputPin = 11;  // MUST BE ODD for RP2040
+  #warning "10MHz input on GP11"
 #endif
 
 uint8_t timer_sliceNum = 0;
@@ -1353,7 +1360,8 @@ uint8_t timer_sliceNum = 0;
 uint32_t timer_count_max = 10000000;  // 10 million
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
-volatile uint32_t timer_pwmTop = (1L << 16);
+const uint32_t timer_default_pwmTop = 50000;  // (1L << 16)
+volatile uint32_t timer_pwmTop = timer_default_pwmTop;
 
 void one_sec_callback() {
   // Make the callback to the RTC simulator.
@@ -1366,19 +1374,19 @@ void one_sec_callback() {
   cumulated_nanos -= centinanos_offset * 100;
   timer_count_max_this_time = timer_count_max + centinanos_offset;
   // Return to full-scale wrapping.
-  timer_pwmTop = (1L << 16);
+  timer_pwmTop = timer_default_pwmTop;
   pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
 }
 
 void timer_on_pwm_wrap() {
   // Clear the interrupt flag that brought us here
-  pwm_clear_irq(timer_sliceNum);
   // Wind on the underlying counter.
+  pwm_clear_irq(timer_sliceNum);
   timer_count += timer_pwmTop;
 
   if (timer_count >= timer_count_max_this_time) {
     one_sec_callback();
-  } else if ((timer_count_max_this_time - timer_count) < (1L << 16)) {
+  } else if ((timer_count_max_this_time - timer_count) < timer_default_pwmTop) {
     // Adjust top for last ramp.
     timer_pwmTop = (timer_count_max_this_time - timer_count);
     pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
@@ -1407,6 +1415,9 @@ void timer_setup_pwm_counter(uint8_t freq_pin) {
   pwm_clear_irq(timer_sliceNum);
   pwm_set_irq_enabled(timer_sliceNum, true);
   irq_set_exclusive_handler(PWM_IRQ_WRAP, timer_on_pwm_wrap);
+  // PWM IRQ was losing ~2 wraps/second (~10ms) when I2C serving was active,
+  // so make PWM wrap pre-empt I2C servicing.
+  irq_set_priority(PWM_IRQ_WRAP, /* hardware_priority */ 0);  // 0=highest
   irq_set_enabled(PWM_IRQ_WRAP, true);
 }
 
@@ -1892,6 +1903,8 @@ void clock_tick(void) {
 void print_gps_skew(void) {
     if (!gps_active) {
       Serial.println("GPS not active.");
+      Serial.print("GPS micros=");
+      Serial.println(gps_micros);
     } else {
       Serial.print("RTC - GPS microseconds=");
       Serial.println((long int)(tick_micros - gps_micros));
@@ -2025,11 +2038,6 @@ void buttons_update(void) {
         if (long_press) {
           sleep_display();
         } else {
-          request_RTC_sync = true;
-          Serial.print("gps_micros=");
-          Serial.print(gps_micros);
-          Serial.print(" last_gps_micros=");
-          Serial.println(last_gps_micros);
         }
         break;
       case 1:
@@ -2042,7 +2050,12 @@ void buttons_update(void) {
         break;
       case 2:
         if (long_press) {
-
+          // Long press syncs to GPS
+          request_RTC_sync = true;
+          Serial.print("gps_micros=");
+          Serial.print(gps_micros);
+          Serial.print(" last_gps_micros=");
+          Serial.println(last_gps_micros);
         } else {
           ds3231_delta_aging(-1);
         }
