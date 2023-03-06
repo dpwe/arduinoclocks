@@ -1130,6 +1130,7 @@ void setup_interrupts(void) {
   irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
   // GPS PPS pin samples on rise.
   gpio_set_irq_enabled(ppsPin, GPIO_IRQ_EDGE_RISE, true);
+  //irq_set_priority(IO_IRQ_BANK0, 0);
   irq_set_enabled(IO_IRQ_BANK0, true);
 }
 #else  // !RP2040
