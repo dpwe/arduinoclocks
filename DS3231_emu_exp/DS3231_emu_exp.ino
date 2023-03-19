@@ -1110,6 +1110,7 @@ volatile unsigned long gps_micros = 0;
 
 //#ifdef ARDUINO_ARCH_RP2040
 #ifdef MY_PICO_RP2040
+//#ifdef NOTDEF
 
 #warning "RP2040 interrupts"
 
@@ -1361,7 +1362,7 @@ uint8_t timer_sliceNum = 0;
 uint32_t timer_count_max = 10000000;  // 10 million
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
-const uint32_t timer_default_pwmTop = 50000;  // (1L << 16)
+const uint32_t timer_default_pwmTop = (1L << 16);
 volatile uint32_t timer_pwmTop = timer_default_pwmTop;
 
 void one_sec_callback() {
