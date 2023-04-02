@@ -1,4 +1,3 @@
-<meta name="google-site-verification" content="wNNljoEelAupTDWqIVC2FKRwh77LJAKRRnke91N-En0" />
 # dpwe clockblog
 
 This is a collection of short articles I've written about my adventures with hobby projects around clocks.
