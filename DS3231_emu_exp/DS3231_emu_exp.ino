@@ -36,6 +36,7 @@
 // Sx - Enable (x=1) / Disable (x=0) clock read on SQWV interrupt (on D3).
 // T - Report most recent temp measurement
 // T1 - Initiate a new temperature conversion
+// Vxxx - Set predelay trim in us.  Larger = sync earlier.
 // Z - Read date/time
 // ZYYYYMMDDhhmmss - Set date/time
 
@@ -863,6 +864,9 @@ void cmd_prompt() {
 
 const int16_t ds3231_freqs[4] = { 1, 1024, 4096, 8192 };
 
+// Trim subtracted from predelay on GPS sync.
+int32_t predelay_trim_us = 0;
+
 void handle_cmd(char cmd, char *arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
   // Number of characters in argument.
@@ -1044,6 +1048,18 @@ void handle_cmd(char cmd, char *arg) {
       Serial.println(ds3231.getTemperature());
       break;
 
+    case 'V':
+      // Predelay for GPS sync in us.  Larger = set clock earlier.
+      predelay_trim_us = atoi(arg);
+      Serial.print("Predelay us trim=");
+      Serial.println(predelay_trim_us);
+      break;
+
+    case 'Y':
+      // Request sync via serial.
+      request_RTC_sync = true;
+      break;
+
     case 'Z':
       // Set date/time: Z20211118094000 - 2021-11-18 09:40:00.
       if (alen) {
@@ -1219,7 +1235,7 @@ void sync_time_from_GPS(void) {
 #else
 #define PREDELAY 999600
 #endif
-    delayMicroseconds(PREDELAY - (my_micros() - gps_micros));
+    delayMicroseconds(PREDELAY - predelay_trim_us - (my_micros() - gps_micros));
     last_gps_sync_unixtime = gps_now(gps).unixtime() + 2;
     RTC_set_time(DateTime(last_gps_sync_unixtime));
   }

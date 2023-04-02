@@ -489,6 +489,9 @@ void setup_GPS(void) {
   pinMode(ppsPin, INPUT_PULLUP);  // Set alarm pin as pullup
 }
 
+// Trim subtracted from predelay on GPS sync.
+static int32_t predelay_trim_us = 0;
+
 void update_GPS(void) {
   if (pending_GPS_interrupt()) {
     sync_time_from_GPS();
@@ -498,10 +501,10 @@ void update_GPS(void) {
       // Delay almost a second, to compensate for setting delay
       if (request_sync_RTC == &ext_rtc) {
         // Slow-update emulated external RTC.
-        delayMicroseconds(996300);
+        delayMicroseconds(996300L - predelay_trim_us);
       } else {
         // Faster internal RTC
-        delayMicroseconds(998500);
+        delayMicroseconds(998500L - predelay_trim_us);
       }
       request_sync_RTC->rtc.adjust(DateTime(unix_time + 1));
       request_sync_RTC->pclock->clear_sync_history();  // Old sync records are irrelevant now.
@@ -1132,6 +1135,7 @@ void cmd_update(time_t t) {
       cmd_buffer[cmd_len] = '\0';
       if (cmd_len > 0) {
         byte cmd0 = cmd_buffer[0];
+        char *arg = cmd_buffer + 1;
         if (cmd0 >= 'a' && cmd0 <= 'z') cmd0 -= ('a' - 'A');
         switch (cmd0) {
           case '?':
@@ -1141,6 +1145,7 @@ void cmd_update(time_t t) {
             Serial.println("Axx  - Set Aging Offset -128 to 127");
             Serial.println("D    - Dim screen");
             Serial.println("Lx   - Logging on (1) / off (0)");
+            Serial.println("Vxxx - Set predelay for GPS sync in us");
             break;
           case 'Y':
             // Sync DS3231 to GPS
@@ -1162,19 +1167,28 @@ void cmd_update(time_t t) {
               wake_up_display();
             }
             break;
+
           case 'L':
             // Logging on / off
-            do_logging = atoi(cmd_buffer + 1);
+            do_logging = atoi(arg);
             break;
+
           case 'A':
             // Set DS3231 aging register.
             {
-              int aging_offset = atoi(cmd_buffer + 1);
+              int aging_offset = atoi(arg);
               active_rtc->setAgingOffset(aging_offset);
               Serial.print("Aging offset set to ");
               Serial.println(aging_offset);
               update_display(active_rtc);
             }
+            break;
+
+          case 'V':
+            // Predelay for GPS sync in us.  Larger = set clock earlier.
+            predelay_trim_us = atoi(arg);
+            Serial.print("Predelay us trim=");
+            Serial.println(predelay_trim_us);
             break;
         }
       }
