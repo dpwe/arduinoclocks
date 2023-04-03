@@ -263,6 +263,7 @@ class DS3231_holder {
 public:
 
   RTC_DS3231 rtc;
+  boolean inited = false;
   boolean have_rtc = false;
   TwoWire *pwire = NULL;
   int sqwPin = 0;
@@ -356,18 +357,21 @@ public:
     return true;
   }
 
-  void setup(TwoWire *p_wire) {
+  bool setup(TwoWire *p_wire) {
     pwire = p_wire;
     if (!rtc.begin(pwire)) {
       Serial.println("Couldn't find RTC");
       Serial.flush();
-      abort();
+      return false;
+      //abort();
     }
+    inited = true;
     rtc.writeSqwPinMode(DS3231_SquareWave1Hz);  // Place SQW pin into 1 Hz mode
     pinMode(sqwPin, INPUT_PULLUP);              // Set alarm pin as pullup
     // Sync even without interrupts
     *prtc_micros = micros();
     sync_clock_to_rtc();
+    return inited;
   }
 
   void update(time_t sys_secs) {
