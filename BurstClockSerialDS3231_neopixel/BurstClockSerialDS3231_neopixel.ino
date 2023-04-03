@@ -41,24 +41,29 @@
 //   Sxx - Execute some number of steps on the stepper motor, don't update internal state 
 //   Brrggbb - Set backlight color to RGB value in hex.
 
-// GE 7-4305
-#define STEPS_PER_CYCLE 2048
-#define MINUTES_PER_CYCLE 12
-// Copal 227
-//#define STEPS_PER_CYCLE 1280  // 2048 steps per rev 28-BYJ48
-//#define STEPS_PER_CYCLE 320  // 512 steps per rev 28-BYJ48
-//#define MINUTES_PER_CYCLE 9
-// If it was a 513 steps per rev x 12 teeth per rev x 50 teeth per hour
-// that would be 8 mins per 285 steps
-//#define STEPS_PER_CYCLE 285  // 513 steps per rev 28-BYJ48
-//#define MINUTES_PER_CYCLE 8
-// Adafruit actually claims it's 32*16.032 steps/rev = 32*2004/125
-// In which case.. 32.62667 steps/minute
-//#define STEPS_PER_CYCLE 2672
-//#define MINUTES_PER_CYCLE 75
+#define GE74305
 
-// Motor direction - default is anticlockwise (GE 7-4305).  Copal 227 is CLOCKWISE.
-//#define CLOCKWISE 
+#ifdef GE74305
+  #warning "Stepping for GE 7-4305"
+  #define STEPS_PER_CYCLE 2048
+  #define MINUTES_PER_CYCLE 12
+#else 
+  #warning "Stepping for Copal 227"
+  #define STEPS_PER_CYCLE 1280  // 2048 steps per rev 28-BYJ48
+  //#define STEPS_PER_CYCLE 320  // 512 steps per rev 28-BYJ48
+  #define MINUTES_PER_CYCLE 9
+  // If it was a 513 steps per rev x 12 teeth per rev x 50 teeth per hour
+  // that would be 8 mins per 285 steps
+  //#define STEPS_PER_CYCLE 285  // 513 steps per rev 28-BYJ48
+  //#define MINUTES_PER_CYCLE 8
+  // Adafruit actually claims it's 32*16.032 steps/rev = 32*2004/125
+  // In which case.. 32.62667 steps/minute
+  //#define STEPS_PER_CYCLE 2672
+  //#define MINUTES_PER_CYCLE 75
+
+  // Motor direction - default is anticlockwise (GE 7-4305).  Copal 227 is CLOCKWISE.
+  #define CLOCKWISE 
+#endif
 
 #include <Tone.h>  // https://github.com/bhagman/Tone
 Tone tone_out[2];  // Allocate two timers so we can *not* use tone_out[0],
@@ -506,10 +511,12 @@ void cmd_update(void) {
 // Pin3 interrupt service
 const byte INTERRUPT_PIN = 3;
 volatile long tick_micros = 0;
+volatile bool rtc_interrupt_happened = false;
 
 void tick_ISR(void) {
   // Record the micros when tick occurs.
   tick_micros = micros();
+  rtc_interrupt_happened = true;
 }
 
 void int_setup(void) {
@@ -582,6 +589,9 @@ void RTC_setup(void) {
   // Report aging offset.
   Serial.print("Aging offset=");
   Serial.println((int8_t)ds3231.getAgingOffset());
+
+  // Indicate a recent interrupt from the DS3231 just to make sure we read it ASAP.
+  rtc_interrupt_happened = true;
 }
 
 void RTC_set_time(const tmElements_t& tm) {
@@ -603,6 +613,29 @@ int last_time_mins = -1;
 
 void RTC_update(void) {
   // See if the minutes have changed.
+  // This version waits for an interrupt from the DS3231 to stay perfectly sync'd.
+  if (rtc_interrupt_happened) {
+    rtc_interrupt_happened = false;
+    // RTClib::now() returns a DateTime object; convert to unixtime; apply TimeZone; convert back to DateTime.
+    DateTime local_now = DateTime(myTZ.toLocal(RTClib::now().unixtime()));
+    int time_mins = local_now.hour() * 60 + local_now.minute();
+    if (time_mins != last_time_mins) {
+      Serial.print("RTC: ");
+      serial_print_datetime(local_now);    
+      // Advance the flip display.
+      if (enable_rtc_updates) {
+        move_to_time(time_mins);
+      }
+      last_time_mins = time_mins;
+    }
+  }
+}
+
+void RTC_update_now_local(void) {
+  // See if the minutes have changed.
+  // This version uses the Arduino system time, as backed by setSyncProvider
+  // but this can drift from the DS3231 by a significant fraction of a second
+  // over a 5 min sync cycle.  (Arduino system clock might be only 1ms/sec)
   tmElements_t tm;
   breakTime(now_local(), tm);
   int time_mins = tm.Hour * 60 + tm.Minute;
@@ -634,6 +667,22 @@ void serial_print_tm(const tmElements_t &tm)
   printDigits(tm.Minute);
   Serial.print(":");
   printDigits(tm.Second);
+  Serial.println();
+}
+
+void serial_print_datetime(const DateTime &dt)
+{
+  Serial.print(dt.year());
+  Serial.print("-");
+  printDigits(dt.month());
+  Serial.print("-");
+  printDigits(dt.day());
+  Serial.print(" ");
+  printDigits(dt.hour());
+  Serial.print(":");
+  printDigits(dt.minute());
+  Serial.print(":");
+  printDigits(dt.second());
   Serial.println();
 }
 
@@ -680,7 +729,8 @@ const uint8_t neo_tick_max = 1;
 
 // Return the same time as seconds(), but x 1000, with milliseconds added on.
 // Had to be put in TimeLib.cpp to access prevMillis.
-//uint16_t seconds_millis() {
+uint16_t my_seconds_millis() {
+  uint16_t milliseconds_this_minute = millis() - (tick_micros / 1000);
 //  uint8_t now_secs = now() % 60;
 //  // prevMillis is set by now() to be the millis from the preceding second.
 //  uint16_t milliseconds_this_minute = (1000 * now_secs) + (millis() - prevMillis);
@@ -688,8 +738,8 @@ const uint8_t neo_tick_max = 1;
 //  if (milliseconds_this_minute > 60000) {
 //    milliseconds_this_minute -= 60000;
 //  }
-//  return milliseconds_this_minute;
-//}
+  return milliseconds_this_minute;
+}
 
 // The whirlygig hole is indirectly illuminated by two neopixels, one on each side.
 // One fades up while the other fades down, approx once per second.
@@ -701,7 +751,7 @@ void neo_update(void) {
   if (++neo_tick < neo_tick_max) return;
   neo_tick = 0;
   // Get the current time.
-  uint16_t time_secs_millis = seconds_millis();
+  uint16_t time_secs_millis = my_seconds_millis();
   uint8_t time_secs = time_secs_millis / 1000;
   uint16_t time_millis = time_secs_millis % 1000;
   neo_val = (time_millis * val_max) / 1000;
@@ -808,28 +858,46 @@ void sys_update(void) {
 // ----------------------------------------------------------
 // Arduino routines.
 
+#define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
+bool serial_available = false;
+
+void open_serial(int baudrate=9600) {
+  Serial.begin(baudrate);
+  // Wait for Serial port to open
+  int i = 0;
+  while (!Serial) {
+    delay(10);
+    ++i;
+    if (i > MAXWAIT_SERIAL) break;
+  }
+  if (i <= MAXWAIT_SERIAL) {
+    serial_available = true;
+  }
+  delay(1000);
+}
+
 void setup() {
-    // Start the I2C interface
-    Wire.begin();
+  // Start the I2C interface
+  Wire.begin();
 
-    // initialize serial communication at 9600 bits per second.
-    Serial.begin(9600);
+  // initialize serial communication at 9600 bits per second.
+  open_serial(9600);
 
-    Serial.print("BurstClock neopixel ");
-    Serial.print(__DATE__);
-    Serial.print(" ");
-    Serial.println(__TIME__);
-    Serial.println("Post-reset settling...");
-    delay(2000);
+  Serial.print("BurstClock neopixel ");
+  Serial.print(__DATE__);
+  Serial.print(" ");
+  Serial.println(__TIME__);
+  Serial.println("Post-reset settling...");
+  delay(2000);
 
-    // Restore saved display state (from previous run or set_time_in_rtc_sram).
-    long saved_display_time = load_display_state_from_sram();
-    flip_setup(saved_display_time);
-    RTC_setup();
-    cmd_setup();
-    int_setup();
-    neo_setup();
-    sys_setup();
+  // Restore saved display state (from previous run or set_time_in_rtc_sram).
+  long saved_display_time = load_display_state_from_sram();
+  flip_setup(saved_display_time);
+  RTC_setup();
+  cmd_setup();
+  int_setup();
+  neo_setup();
+  sys_setup();
 }
 
 void loop() {
