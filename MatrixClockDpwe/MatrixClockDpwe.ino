@@ -234,7 +234,11 @@ void setup() {
   // That's about 12 ppm slow.
   // rtc_compensate(x) makes clock run x*0.1192 ppm fast.  So we need ~rtc_compensate(100).
   //rtc_compensate(100);
-  Teensy3Clock.compensate(100);
+  //Teensy3Clock.compensate(100);
+  // then, by April 2023 it was 14 sec fast
+  // in about 100 days, so about 1.6 ppm fast
+  // so back off ~14 compensation steps. 
+  Teensy3Clock.compensate(86);
 
   Serial.print("RTC_SR=");
   Serial.println(RTC_SR,HEX);
