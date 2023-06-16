@@ -867,6 +867,9 @@ const int16_t ds3231_freqs[4] = { 1, 1024, 4096, 8192 };
 // Trim subtracted from predelay on GPS sync.
 int32_t predelay_trim_us = 0;
 
+// Predeclare flag for triggering sync.
+bool request_RTC_sync = false;
+
 void handle_cmd(char cmd, char *arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
   // Number of characters in argument.
@@ -1268,7 +1271,7 @@ void update_GPS_serial(void) {
 
 //bool gps_active = false;
 
-bool request_RTC_sync = false;
+//bool request_RTC_sync = false;
 
 void setup_GPS(void) {
   pinMode(ppsPin, INPUT_PULLUP);  // Set alarm pin as pullup
@@ -1375,7 +1378,8 @@ const char *clock_name = "10M";
 
 uint8_t timer_sliceNum = 0;
 
-uint32_t timer_count_max = 10000000;  // 10 million
+//uint32_t timer_count_max = 10000000;  // 10 million
+uint32_t timer_count_max = 9999999;  // 10 million - 1.  RP2040 Pico + Connor OCXO is 155 ppb slow
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
 const uint32_t timer_default_pwmTop = (1L << 16);
