@@ -122,7 +122,7 @@ After a few days, however, the messiness of the breadboard setup with the level 
 
 Here's a back view of the boards in their final alignment and closed inside the case.  Here, you can also see a top-view of the switch-mode 7805 replacement I used to get the 5 V bus supply for the RP2040 from the 12 V supply line tapped from the oven control board.
 
-[Back of the display module](images/oven11-rewired-back.jpg)
+![Back of the display module](images/oven11-rewired-back.jpg)
 
 *Back view of the assembly inside its case.*
 
