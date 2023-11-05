@@ -15,6 +15,7 @@
 // Cx - Enable (x=1) / Disable (x=0) the 32 kHz output
 // D - Display all registers
 // Ex - Enable (x=1) / Disable (x=0) clock oscillator when on battery
+// G - print GPS RTS skew
 // Ix - Enable alarm interrupt outputs on sqwv pin (x=1) / Enable sqwv frequency output (x=0)
 // L - Read Alarm 1
 // Lx - Enable (x=1) / Disable (x=0) Alarm 1
@@ -37,6 +38,8 @@
 // T - Report most recent temp measurement
 // T1 - Initiate a new temperature conversion
 // Vxxx - Set predelay trim in us.  Larger = sync earlier.
+// Xnnn - Set/read display sleep timeout secs. 0=no display sleep.
+// Y - sync to GPS
 // Z - Read date/time
 // ZYYYYMMDDhhmmss - Set date/time
 
@@ -48,18 +51,25 @@
 //  8 bits signed, so max -128ppb/+127ppb.
 //
 //  Wiring:
-//                   RP2040 Pico     Feather RP2040  ESP32 Feather
+//                   RP2040 Pico/alt Feather RP2040  ESP32 Feather
 //  10MHz in         GP7             D11  GP11       D11  GP11
-//  I2C server SDA   GP16 I2C0SDA    A4   GP24       A4   GP14
-//  I2C server SCL   GP17 I2C0SCL    A5   GP25       A5   GP8
-//  RTC PPS out      GP13            D13  GP13       D13  GP13
-//  GPS PPS in       GP8             A2   GP28       A2   GP16
-//  GPS Serial in    GP5  UART1RX    RX   GP1        RX   GP2
+//  I2C server SDA   GP16/4 I2C0SDA  A4   GP24       A4   GP14
+//  I2C server SCL   GP17/5 I2C0SCL  A5   GP25       A5   GP8
+//  RTC PPS out      GP13+GP25       D13  GP13       D13  GP13
+//  GPS PPS in       GP8/6           A2   GP28       A2   GP16
+//  GPS Serial in    GP5/9 UART1RX   RX   GP1        RX   GP2
 //  I2C display SDA  GP2  I2C1SDA    SDA  GP2        (built-in)
 //  I2C display SCL  GP3  I2C1SCL    SCL  GP3        (built-in)
-//  BTN A            GP18                 GP9             GP9
-//  BTN B            GP19                 GP8             GP6
-//  BTN C            GP20                 GP7             GP5
+
+//  ST7920 LCD RST   GP16
+//  ST7920 LCD CS/RS GP17
+//  ST7920 LCD SCLK  GP18
+//  ST7920 LCD MOSI  GP19
+//  Backlight        GP28                            (built-in GP45)
+
+//  BTN A            GP18/20              GP9             GP9
+//  BTN B            GP19/21              GP8             GP6
+//  BTN C            GP20/22              GP7             GP5
 //
 //  DESIGN
 //
@@ -96,22 +106,29 @@
 #define FEATHER_OLED
 #else
 #define MY_PICO_RP2040
+#define MY_PICO_RP2040_LCD  // Alternate RP2040 pinout for 3" LCD on SPI
 #endif
 // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
 // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
 #ifdef MY_PICO_RP2040
-  const int ext_sda_pin = 16;
-  const int ext_scl_pin = 17;
+  #ifdef MY_PICO_RP2040_LCD
+    const int ext_sda_pin = 4;
+    const int ext_scl_pin = 5;
+  #else
+    const int ext_sda_pin = 16;
+    const int ext_scl_pin = 17;
+  #endif
+#define DISPLAY_ST7920  // 128x64 green-yellow LCD matrix
 #else  // FEATHER_RP2040
   const int ext_sda_pin = 24;  // A4;
   const int ext_scl_pin = 25;  // A5;
+#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
 #endif  
 #define EXT_I2C Wire
 const int int_sda_pin = 2;
 const int int_scl_pin = 3;
 #define INT_I2C Wire1
 
-#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
 
 #else
 // ESP32-S3
@@ -131,6 +148,7 @@ const int ext_scl_pin = A5;
 #include <Adafruit_GFX.h>
 
 #ifdef DISPLAY_SSD1351
+#warning "DISPLAY_SSD1351 128x128 OLED"
 #include <Adafruit_SSD1351.h>
 // Screen dimensions
 #define SCREEN_WIDTH 128
@@ -157,6 +175,7 @@ Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, C
 #endif
 
 #ifdef DISPLAY_ST7789
+#warning "DISPLAY_ST7789 Built-in display on ESP32-S3 TFT"
 #include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
 
 #define SCREEN_WIDTH 240
@@ -166,6 +185,7 @@ Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, C
 // Use dedicated hardware SPI pins
 Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
+#define DISPLAY_BACKLIGHT
 const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
 
 #define WHITE ST77XX_WHITE
@@ -180,7 +200,10 @@ const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backligh
 #endif
 
 #ifdef DISPLAY_SH1107
+#warning "DISPLAY_SH1107 - Adafruit OLED either feather 64x128 or external 128x128"
 #include <Adafruit_SH110X.h>
+// SH1107 needs display.display() after drawing
+#define DISPLAY_DISPLAY_CMD
 
 #ifdef FEATHER_OLED
 const int display_address = 0x3C;
@@ -207,6 +230,39 @@ Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C)
 
 #endif
 
+#ifdef DISPLAY_ST7920
+#warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
+#include "ST7920_GFX_Library.h"
+
+// SH1107 needs display.display() after drawing
+#define DISPLAY_DISPLAY_CMD
+
+// Backlight pin
+#define DISPLAY_BACKLIGHT
+const int backlightPin = 28;
+
+#define SCREEN_HEIGHT 64
+#define SCREEN_WIDTH 128
+#define SIZE_1X
+
+#define CS_PIN 17
+// Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
+ST7920 display(CS_PIN);
+
+// Monochrome, all colors are white
+#define BLUE 1
+#define RED 1
+#define GREEN 1
+#define CYAN 1
+#define MAGENTA 1
+#define YELLOW 1
+// "Black" means background
+#define BLACK 0
+#define WHITE 1
+
+#endif
+
+
 #ifdef SIZE_1X
 // 1x size
 #define SMALL_SIZE 1
@@ -225,11 +281,12 @@ void setup_display(void) {
 #ifdef DISPLAY_SSD1351
   display.begin();
 #endif
-#ifdef DISPLAY_ST7789
+#ifdef DISPLAY_BACKLIGHT
   // turn on backlite
-  pinMode(TFT_BACKLITE, OUTPUT);
-  analogWrite(TFT_BACKLITE, 128);
-
+  pinMode(backlightPin, OUTPUT);
+  analogWrite(backlightPin, 128);
+#endif
+#ifdef DISPLAY_ST7789
   display.init(135, 240);  // Init ST7789 240x135
   display.setRotation(3);
 #endif
@@ -240,6 +297,19 @@ void setup_display(void) {
   display.clearDisplay();
   display.display();
   display.setRotation(1);
+#endif
+#ifdef DISPLAY_ST7920
+  pinMode(backlightPin, OUTPUT);
+  digitalWrite(backlightPin, HIGH);
+  display.begin();
+
+  display.setTextSize(1);
+  display.setTextColor(BLACK);
+  display.setCursor(0,0);
+  display.println("Hello, world!");
+  display.display();
+  delay(2000);
+
 #endif
 
   display.fillScreen(BLACK);
@@ -318,6 +388,11 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
   }
 }
 
+// Updated by main loop, used to display here.
+long int skew_us = 0;
+void display_skew_us(long int skew_microseconds);  // forward dec.
+
+
 void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_active) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
@@ -334,6 +409,10 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
   // S1 M1 H1 D1 M2 H2 D2
   // CC SS AO TH TL
 
+#ifdef DISPLAY_DISPLAY_CMD
+  display.clearDisplay();
+#endif
+
   // Clock source identifier tag
   display.setTextSize(SMALL_SIZE);
   display.setTextColor(RED, BLACK);
@@ -349,6 +428,7 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
     display.setTextColor(GREEN, BLACK);
     display.print("   ");
   }
+  display_skew_us(skew_us);
 
   // Time, double size.
   display.setTextSize(LARGE_SIZE);
@@ -358,6 +438,7 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
   strcpy(s, "hh:mm:ss");
   ds3231.now().toString(s);
   display.print(s);
+  //Serial.println(s);
 
   // Date, normal size, yellow.
   display.setTextSize(SMALL_SIZE);
@@ -417,7 +498,7 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
   display.print(s);
   display.print("   ");
 
-#ifdef DISPLAY_SH1107
+#ifdef DISPLAY_DISPLAY_CMD
   display.display();
 #endif
 }
@@ -427,8 +508,8 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
 bool gps_active = false;
 
 void display_skew_us(long int skew_microseconds) {
-  Serial.print("display_skew_us=");
-  Serial.println(skew_microseconds);
+  //Serial.print("display_skew_us=");
+  //Serial.println(skew_microseconds);
   char s[5];  // "-0.0\0"
   long int skew_milliseconds;
   if (skew_microseconds < 0L) {
@@ -870,6 +951,10 @@ int32_t predelay_trim_us = 0;
 // Predeclare flag for triggering sync.
 bool request_RTC_sync = false;
 
+// Predeclare display timeout val.
+uint32_t display_sleep_timeout_secs = 300;
+
+
 void handle_cmd(char cmd, char *arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
   // Number of characters in argument.
@@ -931,7 +1016,7 @@ void handle_cmd(char cmd, char *arg) {
       break;
 
     case 'G':
-      // Print current microseconds skew vs. GPS, if any.
+     // Print current microseconds skew vs. GPS, if any.
       print_gps_skew();
       break;
 
@@ -1058,6 +1143,15 @@ void handle_cmd(char cmd, char *arg) {
       Serial.println(predelay_trim_us);
       break;
 
+    case 'X':
+      // Set/read display sleep timeout in secs.
+      if (alen) {
+        display_sleep_timeout_secs = atoi(arg);
+      }
+      Serial.print("Display sleep (sec, 0=disabled)=");
+      Serial.println(display_sleep_timeout_secs);
+      break;
+
     case 'Y':
       // Request sync via serial.
       request_RTC_sync = true;
@@ -1118,8 +1212,13 @@ void cmd_update(void) {
 //   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
 //   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
 #ifdef MY_PICO_RP2040
-  const int ppsPin = 8;  // PPS output from GPS board
-  #warning "pps pin GP8"
+  #ifdef MY_PICO_RP2040_LCD
+    const int ppsPin = 6;  // PPS output from GPS board
+    #warning "pps pin GP6"
+  #else
+    const int ppsPin = 8;  // PPS output from GPS board
+    #warning "pps pin GP8"
+  #endif
 #else
   const int ppsPin = A2;  // PPS output from GPS board
   #warning "pps pin A2"
@@ -1248,8 +1347,13 @@ void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040
 #ifdef MY_PICO_RP2040
   // Configure Pico UART2
-  SerialGPS.setRX(5);
-  SerialGPS.setTX(4);
+  #ifdef MY_PICO_RP2040_LCD
+    SerialGPS.setTX(8);
+    SerialGPS.setRX(9);
+  #else
+    SerialGPS.setTX(4);
+    SerialGPS.setRX(5);
+  #endif
 #else
   SerialGPS.setRX(1);
   SerialGPS.setTX(0);
@@ -1898,7 +2002,7 @@ const uint32_t sqwv_pulse_ms = 500;
 
 // Detect a tick in foreground.
 volatile bool tick_happened = false;
-// Interrupt-updated micrs() at last tick (to help interface with explorer).
+// Interrupt-updated micros() at last tick (to help interface with explorer).
 volatile uint32_t tick_micros = 0;
 
 void clock_tick(void) {
@@ -1939,9 +2043,9 @@ bool display_on = true;
 
 void wake_up_display(void) {
   Serial.println("wake_display");
-#ifdef DISPLAY_ST7789
+#ifdef DISPLAY_BACKLIGHT
   // turn on backlite
-  analogWrite(TFT_BACKLITE, 128);
+  analogWrite(backlightPin, 128);
 #endif
   display_on = true;
   ds3231_display(ds3231, clock_name, gps_active);
@@ -1949,27 +2053,29 @@ void wake_up_display(void) {
 
 void sleep_display(void) {
   Serial.println("sleep_display");
-#ifdef DISPLAY_SH1107
+#ifdef DISPLAY_DISPLAY_CMD
   display.clearDisplay();
   display.display();
 #else
   display.fillScreen(BLACK);
 #endif
-#ifdef DISPLAY_ST7789
+#ifdef DISPLAY_BACKLIGHT
   // turn off backlite
-  analogWrite(TFT_BACKLITE, 0);
+  analogWrite(backlightPin, 0);
 #endif
   display_on = false;
 }
 
 // Sleep display after 5 mins.
-#define DISPLAY_SLEEP_MILLIS (1000 * 5 * 60)
+//uint32_t display_sleep_timeout_secs = 300;
+// forward-declared above serial command block.
 uint32_t millis_last_action = 0;
 
 void sleep_update(void) {
   // Check the time and sleep display if we've been idle.
   // We use millis since ds3231 time may be changing.
-  if (millis_last_action && (millis() - millis_last_action) > DISPLAY_SLEEP_MILLIS) {
+  if (millis_last_action && display_sleep_timeout_secs 
+      && (millis() - millis_last_action) > 1000 * display_sleep_timeout_secs) {
     if (display_on) {
       sleep_display();
     }
@@ -1978,7 +2084,8 @@ void sleep_update(void) {
 
 void sleep_tickle(void) {
   // Reset display sleep countdown.
-  Serial.println("tickle");
+  Serial.print("tickle: display_on=");
+  Serial.println(display_on);
   millis_last_action = millis();
   if (!display_on) {
     wake_up_display();
@@ -1995,7 +2102,11 @@ void sleep_tickle(void) {
     int button_pins[NUM_BUTTONS] = {9, 8, 7};
 #warning "Feather RP2040"
 #else  // RP2040 Pico
-    int button_pins[NUM_BUTTONS] = {18, 19, 20};
+  #ifdef MY_PICO_RP2040_LCD
+    int button_pins[NUM_BUTTONS] = {20, 21, 22};
+  #else
+    int 10_pins[NUM_BUTTONS] = {18, 19, 20};
+  #endif
 #endif
 #else
   int button_pins[NUM_BUTTONS] = {9, 6, 5};
@@ -2239,6 +2350,9 @@ int last_sec = 0;
 uint32_t last_tick_micros = 0;
 time_t secs_last_change = 0;
 
+uint32_t raw_tick_count = 0;
+long int last_skew_us = 0;
+
 void loop() {
   
   // Emulator loop
@@ -2254,7 +2368,18 @@ void loop() {
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
     // Half way through second is also when we calculate and show the skew
     if(display_on && gps_active) {
-      display_skew_us((long int)(tick_micros - gps_micros));
+      skew_us = (long int)(tick_micros - gps_micros);
+      //display_skew_us(skew_us);
+      // Every 100 ticks, report skew_us to serial, to track drift
+      if (raw_tick_count % 100 == 0) {
+        Serial.print("raw_tick_count=");
+        Serial.print(raw_tick_count);
+        Serial.print(" skew_us=");
+        Serial.print(skew_us);
+        Serial.print(" delta skew_us=");
+        Serial.println(skew_us - last_skew_us);
+        last_skew_us = skew_us;
+      }
     }
   }
   // If the clock ticked, set up for next second.
@@ -2263,6 +2388,7 @@ void loop() {
     tick_happened = false;
     // Report seconds.
     //Serial.println(registers[0], HEX);
+    ++raw_tick_count;
   }
 
   // Explorer loop

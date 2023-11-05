@@ -237,7 +237,9 @@ void setup() {
   //Teensy3Clock.compensate(100);
   // then, by April 2023 it was 14 sec fast
   // in about 100 days, so about 1.6 ppm fast
-  // so back off ~14 compensation steps. 
+  // so back off ~14 compensation steps (to 86).
+  // Then, by Aug 20, 2023, it was 15 sec slow
+  // in about 135 days, so about -1.3 ppm, or advance 11 to 97.
   Teensy3Clock.compensate(86);
 
   Serial.print("RTC_SR=");
