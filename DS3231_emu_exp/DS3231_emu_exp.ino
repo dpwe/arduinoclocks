@@ -417,13 +417,13 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
 #endif
 
   // Clock source identifier tag
-  display.setTextSize(SMALL_SIZE);
-  display.setTextColor(RED, BLACK);
-  display.setCursor(17 * CHAR_W, 0);
-  display.print(clock_name);
+  //display.setTextSize(SMALL_SIZE);
+  //display.setTextColor(RED, BLACK);
+  //display.setCursor(17 * CHAR_W, 0);
+  //display.print(clock_name);
 
   // GPS status
-  display.setCursor(17 * CHAR_W, ROW_H);
+  display.setCursor(17 * CHAR_W, 0 * ROW_H);
   if (gps_active) {
     display.setTextColor(BLACK, GREEN);
     display.print("GPS");
@@ -509,6 +509,7 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
 // ------ Skew re: GPS display -----
 
 bool gps_active = false;
+int delta_skew_us = 0;
 
 void display_skew_us(long int skew_microseconds) {
   //Serial.print("display_skew_us=");
@@ -549,14 +550,13 @@ void display_skew_us(long int skew_microseconds) {
   s[4] = '\0';
   // Now actually display it.
   display.setTextColor(RED, BLACK);
-  display.setCursor(16 * CHAR_W, 2 * ROW_H);
+  display.setCursor(16 * CHAR_W, 1 * ROW_H);
   if (gps_active) {
     display.print(s);
     // Add latest delta too
-    int delta_skew_us = skew_us - last_skew_us;
     s[0] = 127;  // "Delta" character.
     itoa(delta_skew_us, s + 1, 10);
-    display.setCursor(16 * CHAR_W, 3 * ROW_H);
+    display.setCursor(16 * CHAR_W, 2 * ROW_H);
     display.print(s);
   } else {
     display.print("    ");
@@ -2452,13 +2452,14 @@ void loop() {
       //display_skew_us(skew_us);
       // Every 100 ticks, report skew_us to serial, to track drift
       if (raw_tick_count % 100 == 0) {
+        delta_skew_us = skew_us - last_skew_us;
+        last_skew_us = skew_us;
         Serial.print("raw_tick_count=");
         Serial.print(raw_tick_count);
         Serial.print(" skew_us=");
         Serial.print(skew_us);
         Serial.print(" delta skew_us=");
-        Serial.println(skew_us - last_skew_us);
-        last_skew_us = skew_us;
+        Serial.println(delta_skew_us);
       }
     }
   }
