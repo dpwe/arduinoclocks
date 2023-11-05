@@ -15,8 +15,10 @@
 // Cx - Enable (x=1) / Disable (x=0) the 32 kHz output
 // D - Display all registers
 // Ex - Enable (x=1) / Disable (x=0) clock oscillator when on battery
-// G - print GPS RTS skew
+// Gx - Enable/disable auto-clock-sync on GPS lock.
 // Ix - Enable alarm interrupt outputs on sqwv pin (x=1) / Enable sqwv frequency output (x=0)
+// Jnnn - Write DAC output value (0..4095)
+// K - Save DAC value to EEPROM.
 // L - Read Alarm 1
 // Lx - Enable (x=1) / Disable (x=0) Alarm 1
 // Lss - Set Alarm 1 for every minute at seconds SS
@@ -390,6 +392,7 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
 
 // Updated by main loop, used to display here.
 long int skew_us = 0;
+long int last_skew_us = 0;
 void display_skew_us(long int skew_microseconds);  // forward dec.
 
 
@@ -547,8 +550,17 @@ void display_skew_us(long int skew_microseconds) {
   // Now actually display it.
   display.setTextColor(RED, BLACK);
   display.setCursor(16 * CHAR_W, 2 * ROW_H);
-  if (gps_active) display.print(s);
-  else display.print("    ");
+  if (gps_active) {
+    display.print(s);
+    // Add latest delta too
+    int delta_skew_us = skew_us - last_skew_us;
+    s[0] = 127;  // "Delta" character.
+    itoa(delta_skew_us, s + 1, 10);
+    display.setCursor(16 * CHAR_W, 3 * ROW_H);
+    display.print(s);
+  } else {
+    display.print("    ");
+  }
 }
 
 // -------------- Time --------------------
@@ -814,6 +826,43 @@ void print_registers_fancy(uint8_t *registers) {
   Serial.println("");
 }
 
+// ---- MCP4728 DAC / EEPROM output ------
+#include <Adafruit_MCP4728.h>
+
+// DAC is on internal (main) I2C
+#define DAC_I2C INT_I2C
+// DAC I2C address
+#define DAC_I2C_ADDRESS 0x60
+
+Adafruit_MCP4728 mcp;
+bool dac_available = false;
+int dac_a_value = 1500;
+
+void dac_set_value(int value) {
+  if (dac_available) {
+    dac_a_value = value;
+    mcp.setChannelValue(MCP4728_CHANNEL_A, dac_a_value);
+  }
+}
+
+void dac_save_to_eeprom(void) {
+  if (dac_available) {
+    mcp.saveToEEPROM();
+  }
+}
+
+void setup_dac(void) {
+  if (!mcp.begin(DAC_I2C_ADDRESS, &DAC_I2C)) {
+    Serial.println("Failed to find MCP4728 chip");
+    dac_available = false;
+  } else {
+    Serial.println("MCP4728 DAC initialized");
+    dac_available = true;
+    // Set A output to mid-Vcc.
+    //mcp.setChannelValue(MCP4728_CHANNEL_A, dac_a_value);
+    // Let the EEPROM value sustain on reboot.
+  }
+}
 
 // ---------------------- CLI -----------------------------------------
 // DS3231 Explorer: Input commands over serial line
@@ -954,6 +1003,8 @@ bool request_RTC_sync = false;
 // Predeclare display timeout val.
 uint32_t display_sleep_timeout_secs = 300;
 
+// Do we set the time when GPS is newly detected?
+bool set_time_on_gps_sync = true;
 
 void handle_cmd(char cmd, char *arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
@@ -1016,8 +1067,11 @@ void handle_cmd(char cmd, char *arg) {
       break;
 
     case 'G':
-     // Print current microseconds skew vs. GPS, if any.
-      print_gps_skew();
+      // Set flag to auto-sync when GPS becomes active.
+      if (alen) {
+        set_time_on_gps_sync = atob(arg);
+      }
+      print_enabled_disabled("Time sync on GPS lock", set_time_on_gps_sync);
       break;
 
     case 'I':
@@ -1028,6 +1082,20 @@ void handle_cmd(char cmd, char *arg) {
         ds3231.setControlReg(ctrl);
       }
       print_enabled_disabled("Alarm interrupt outputs", ctrl & 0x04);
+      break;
+
+    case 'J':
+      // Write value to DAC output.
+      if (alen) {
+        dac_set_value(atoi(arg));
+      }
+      Serial.print("DAC A value=");
+      Serial.println(dac_a_value);
+      break;
+
+    case 'K':
+      dac_save_to_eeprom();
+      Serial.println("DAC EEPROM write.");
       break;
 
     case 'L':
@@ -1138,9 +1206,13 @@ void handle_cmd(char cmd, char *arg) {
 
     case 'V':
       // Predelay for GPS sync in us.  Larger = set clock earlier.
-      predelay_trim_us = atoi(arg);
+      if(alen) {
+        predelay_trim_us = atoi(arg);
+      }
       Serial.print("Predelay us trim=");
       Serial.println(predelay_trim_us);
+      Serial.print("skew_us=");
+      Serial.println(skew_us);
       break;
 
     case 'X':
@@ -1333,7 +1405,7 @@ void sync_time_from_GPS(void) {
     // Then, we delay for most of a second to be able to anticipate the actual moment
     // so we add another second to the time we set.
 #ifdef ARDUINO_ARCH_RP2040
-#define PREDELAY 996950
+#define PREDELAY 997000
 #else
 #define PREDELAY 999600
 #endif
@@ -1392,6 +1464,10 @@ void update_GPS(void) {
     }
   }
   if ((micros() - last_gps_micros) < 2000000) {
+    if (!gps_active && set_time_on_gps_sync) {
+      // If we're transitioning to GPS active, and if enabled, auto-sync when GPS comes on.
+      request_RTC_sync = true;
+    }
     gps_active = true;
   } else {
     gps_active = false;
@@ -2344,6 +2420,10 @@ void setup()
   cmd_setup();
   Serial.println("about to buttons_setup...");
   buttons_setup();
+
+  // DAC setup
+  Serial.println("about to DAC setup...");
+  setup_dac();
 }
 
 int last_sec = 0;
@@ -2351,7 +2431,6 @@ uint32_t last_tick_micros = 0;
 time_t secs_last_change = 0;
 
 uint32_t raw_tick_count = 0;
-long int last_skew_us = 0;
 
 void loop() {
   
@@ -2367,7 +2446,8 @@ void loop() {
 #endif
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
     // Half way through second is also when we calculate and show the skew
-    if(display_on && gps_active) {
+    if(gps_active) {
+      // POSITIVE skew_us means XO tick is LATE relative to GPS; if it's getting LATER, XO needs to get FASTER to fix.
       skew_us = (long int)(tick_micros - gps_micros);
       //display_skew_us(skew_us);
       // Every 100 ticks, report skew_us to serial, to track drift
