@@ -2188,8 +2188,8 @@ void sleep_update(void) {
 
 void sleep_tickle(void) {
   // Reset display sleep countdown.
-  Serial.print("tickle: display_on=");
-  Serial.println(display_on);
+  //Serial.print("tickle: display_on=");
+  //Serial.println(display_on);
   millis_last_action = millis();
   if (!display_on) {
     wake_up_display();
