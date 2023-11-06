@@ -1012,7 +1012,9 @@ int32_t predelay_trim_us = 0;
 bool request_RTC_sync = false;
 
 // Predeclare display timeout val.
-uint32_t display_sleep_timeout_secs = 300;
+//uint32_t display_sleep_timeout_secs = 300;
+// No display timeout by default for LCD matrix output.
+uint32_t display_sleep_timeout_secs = 0;
 
 // Do we set the time when GPS is newly detected?
 bool set_time_on_gps_sync = true;
