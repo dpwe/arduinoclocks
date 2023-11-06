@@ -427,9 +427,11 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
   if (gps_active) {
     display.setTextColor(BLACK, GREEN);
     display.print("GPS");
+    display.drawLine(17 * CHAR_W - 1, 0 * ROW_H, 17 * CHAR_W - 1, 1 * ROW_H - 1, WHITE);
   } else {
     display.setTextColor(GREEN, BLACK);
     display.print("   ");
+    display.drawLine(17 * CHAR_W - 1, 0 * ROW_H, 17 * CHAR_W - 1, 1 * ROW_H - 1, BLACK);
   }
   display_skew_us(skew_us);
 
@@ -530,7 +532,7 @@ void display_skew_us(long int skew_microseconds) {
       skew_milliseconds = 999L;
     }
     itoa(skew_milliseconds, s + 1, 10);
-  } else {
+  } else if (skew_microseconds >= 995L) {
     // format as +/-0.1
     // Round up
     skew_microseconds += 50L;  // rounding
@@ -538,6 +540,13 @@ void display_skew_us(long int skew_microseconds) {
     s[1] = '0' + skew_milliseconds;
     s[2] = '.';
     s[3] = '0' + ((skew_microseconds / 100L) - (10 * skew_milliseconds));
+  } else {
+    // format as +/-.99
+    // Round up
+    skew_microseconds += 5L;  // rounding
+    s[1] = '.';
+    s[2] = '0' + (skew_microseconds / 100L);
+    s[3] = '0' + ((skew_microseconds / 10L) % 10L);
   }
   if (s[2] == '\0') {
     s[2] = ' ';
@@ -554,7 +563,7 @@ void display_skew_us(long int skew_microseconds) {
   if (gps_active) {
     display.print(s);
     // Add latest delta too
-    s[0] = 127;  // "Delta" character.
+    s[0] = 30;  // "Up filled triangle" character.
     itoa(delta_skew_us, s + 1, 10);
     display.setCursor(16 * CHAR_W, 2 * ROW_H);
     display.print(s);
@@ -858,9 +867,8 @@ void setup_dac(void) {
   } else {
     Serial.println("MCP4728 DAC initialized");
     dac_available = true;
-    // Set A output to mid-Vcc.
-    //mcp.setChannelValue(MCP4728_CHANNEL_A, dac_a_value);
-    // Let the EEPROM value sustain on reboot.
+    // Read back the current value of DAC A, we assume as set from EEPROM.
+    dac_a_value = mcp.getChannelValue(MCP4728_CHANNEL_A);
   }
 }
 
