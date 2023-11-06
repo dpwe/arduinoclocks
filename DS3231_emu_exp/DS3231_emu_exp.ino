@@ -32,6 +32,7 @@
 // Mhhmm - Set Alarm 2 for every day at time hh:mm
 // MWhhmm - Set Alarm 2 for every week on dow W (Sunday = 1) at hh:mm
 // MDDhhmm - Set Alarm 2 for every month on date DD at hh:mm
+// Onn - Set backlight brightness (0..255)
 // Px - Enable (x=1) / Disable (x=0) continuous polling of current time.
 // Q - Read the sqwv frequency
 // Qx - Set sqwv frequency : x=0 -> 1 Hz / x=1 -> 1024 Hz / x=2 -> 4096 Hz / x=3 -> 8192 Hz
@@ -279,6 +280,8 @@ ST7920 display(CS_PIN);
 #define CHAR_W 12
 #endif
 
+uint8_t backlight_brightness = 128;
+
 void setup_display(void) {
 #ifdef DISPLAY_SSD1351
   display.begin();
@@ -286,7 +289,7 @@ void setup_display(void) {
 #ifdef DISPLAY_BACKLIGHT
   // turn on backlite
   pinMode(backlightPin, OUTPUT);
-  analogWrite(backlightPin, 128);
+  analogWrite(backlightPin, backlight_brightness);
 #endif
 #ifdef DISPLAY_ST7789
   display.init(135, 240);  // Init ST7789 240x135
@@ -302,7 +305,7 @@ void setup_display(void) {
 #endif
 #ifdef DISPLAY_ST7920
   pinMode(backlightPin, OUTPUT);
-  digitalWrite(backlightPin, HIGH);
+  analogWrite(backlightPin, backlight_brightness);
   display.begin();
 
   display.setTextSize(1);
@@ -1014,6 +1017,9 @@ uint32_t display_sleep_timeout_secs = 300;
 // Do we set the time when GPS is newly detected?
 bool set_time_on_gps_sync = true;
 
+// Is the display currently active?
+bool display_on = true;
+
 void handle_cmd(char cmd, char *arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
   // Number of characters in argument.
@@ -1161,10 +1167,23 @@ void handle_cmd(char cmd, char *arg) {
       Serial.println(s);
       break;
 
+    case 'O':
+      // Set active backlight brightness
+      if (alen) {
+        backlight_brightness = atoi(arg);
+        if (display_on) {
+          analogWrite(backlightPin, backlight_brightness);
+        }
+      }
+      Serial.print("Backlight brightness (0..255)=");
+      Serial.println(backlight_brightness);
+      break;
+
     case 'P':
       // Enable/disable continuous polling of time across I2C.
       if (alen) {
         polling_interval = atoi(arg);
+        if (polling_interval < 0)  polling_interval = 0;
       }
       Serial.print("Polling interval (ms, 0=disabled)=");
       Serial.println(polling_interval);
@@ -2123,13 +2142,14 @@ void print_gps_skew(void) {
 
 // ------------- Display sleep (screensaver) -----------
 
-bool display_on = true;
+// Moved up for CLI access
+//bool display_on = true;
 
 void wake_up_display(void) {
   Serial.println("wake_display");
 #ifdef DISPLAY_BACKLIGHT
   // turn on backlite
-  analogWrite(backlightPin, 128);
+  analogWrite(backlightPin, backlight_brightness);
 #endif
   display_on = true;
   ds3231_display(ds3231, clock_name, gps_active);
