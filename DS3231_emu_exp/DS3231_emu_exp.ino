@@ -70,9 +70,9 @@
 //  ST7920 LCD MOSI  GP19
 //  Backlight        GP28                            (built-in GP45)
 
-//  BTN A            GP18/20              GP9             GP9
-//  BTN B            GP19/21              GP8             GP6
-//  BTN C            GP20/22              GP7             GP5
+//  BTN A            GP18/20              GP9             GP9      press:           long press: sleep display
+//  BTN B            GP19/21              GP8             GP6      press: inc trim  long press: ?save trim to eeprom
+//  BTN C            GP20/22              GP7             GP5      press: dec trim  long press: sync to GPS
 //
 //  DESIGN
 //
@@ -398,6 +398,8 @@ long int skew_us = 0;
 long int last_skew_us = 0;
 void display_skew_us(long int skew_microseconds);  // forward dec.
 
+// Modified by button 1, show/hide RTC detail
+bool display_detail = true;
 
 void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_active) {
   // Graphical display of DS3231 state for 16x8 display:
@@ -456,55 +458,57 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
   ds3231.now().toString(s);
   display.print(s);
 
-  // Alarm1
-  display.setTextColor(CYAN, BLACK);
-  display.setCursor(0, 3 * ROW_H);
-  strcpy(s, "A1: ");
-  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm1Mode(), /* alarm_num */ 1);
-  ds3231.getAlarm1().toString(s);
-  display.print(s);
+  if (display_detail) {
+    // Alarm1
+    display.setTextColor(CYAN, BLACK);
+    display.setCursor(0, 3 * ROW_H);
+    strcpy(s, "A1: ");
+    getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm1Mode(), /* alarm_num */ 1);
+    ds3231.getAlarm1().toString(s);
+    display.print(s);
 
-  // Alarm2
-  display.setTextColor(BLUE, BLACK);
-  display.setCursor(0, 4 * ROW_H);
-  strcpy(s, "A2: ");
-  getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm2Mode(), /* alarm_num */ 2);
-  ds3231.getAlarm2().toString(s);
-  display.print(s);
+    // Alarm2
+    display.setTextColor(BLUE, BLACK);
+    display.setCursor(0, 4 * ROW_H);
+    strcpy(s, "A2: ");
+    getAlarmModeTemplateString(s + 4, (uint8_t)ds3231.getAlarm2Mode(), /* alarm_num */ 2);
+    ds3231.getAlarm2().toString(s);
+    display.print(s);
 
-  // Control byte
-  display.setTextColor(GREEN, BLACK);
-  display.setCursor(0, 5 * ROW_H);
-  strcpy(s, "C: ");
-  display.print(s);
-  print_bits_tft(3 * CHAR_W, 5 * ROW_H, ds3231.getControlReg(), CONTROL_SHORTNAMES, GREEN, BLACK);
+    // Control byte
+    display.setTextColor(GREEN, BLACK);
+    display.setCursor(0, 5 * ROW_H);
+    strcpy(s, "C: ");
+    display.print(s);
+    print_bits_tft(3 * CHAR_W, 5 * ROW_H, ds3231.getControlReg(), CONTROL_SHORTNAMES, GREEN, BLACK);
 
-  // Status byte
-  display.setTextColor(YELLOW, BLACK);
-  display.setCursor(0, 6 * ROW_H);
-  strcpy(s, "S: ");
-  display.print(s);
-  print_bits_tft(3 * CHAR_W, 6 * ROW_H, ds3231.getStatusReg(), STATUS_SHORTNAMES, YELLOW, BLACK);
+    // Status byte
+    display.setTextColor(YELLOW, BLACK);
+    display.setCursor(0, 6 * ROW_H);
+    strcpy(s, "S: ");
+    display.print(s);
+    print_bits_tft(3 * CHAR_W, 6 * ROW_H, ds3231.getStatusReg(), STATUS_SHORTNAMES, YELLOW, BLACK);
 
-  // Aging offset
-  display.setTextColor(RED, BLACK);
-  display.setCursor(0, 7 * ROW_H);
-  strcpy(s, "A:");
-  itoa(ds3231.getAging(), s + 2, 10);
-  display.print(s);
-  display.print("   ");
+    // Aging offset
+    display.setTextColor(RED, BLACK);
+    display.setCursor(0, 7 * ROW_H);
+    strcpy(s, "A:");
+    itoa(ds3231.getAging(), s + 2, 10);
+    display.print(s);
+    display.print("   ");
 
-  // Temp
-  display.setTextColor(MAGENTA, BLACK);
-  display.setCursor(8 * CHAR_W, 7 * ROW_H);
-  strcpy(s, "T:");
-  float t = ds3231.getTemperature();
-  itoa(int(t), s + 2, 10);
-  char *s_end = s + strlen(s);
-  *s_end = '.';
-  itoa(100 * (t - int(t)), s_end + 1, 10);
-  display.print(s);
-  display.print("   ");
+    // Temp
+    display.setTextColor(MAGENTA, BLACK);
+    display.setCursor(8 * CHAR_W, 7 * ROW_H);
+    strcpy(s, "T:");
+    float t = ds3231.getTemperature();
+    itoa(int(t), s + 2, 10);
+    char *s_end = s + strlen(s);
+    *s_end = '.';
+    itoa(100 * (t - int(t)), s_end + 1, 10);
+    display.print(s);
+    display.print("   ");
+  }
 
 #ifdef DISPLAY_DISPLAY_CMD
   display.display();
@@ -848,7 +852,10 @@ void print_registers_fancy(uint8_t *registers) {
 
 Adafruit_MCP4728 mcp;
 bool dac_available = false;
-int dac_a_value = 1500;
+int dac_a_value = 1500;  // about 20 counts per (us per 100s, or 1e-8), so 2 counts = 1ppb
+// for 10^7-1 counts per sec, DAC=1892 ended up 1.3 ppb fast
+// for 10^7 counts per sec, DAC=2056 was pretty flat
+// so ? 164 DAC for 100 ppb
 
 void dac_set_value(int value) {
   if (dac_available) {
@@ -1420,6 +1427,12 @@ bool gps_time_valid(class TinyGPS &gps) {
   return (time != gps.GPS_INVALID_TIME) && (age_millis < 1000);
 }
 
+time_t gps_unixtime(void) {
+  unsigned long time;
+  gps.get_datetime(0, &time, 0);
+  return time;
+}
+
 unsigned long last_gps_micros = 0;
 time_t last_gps_sync_unixtime = 0;
 
@@ -1482,6 +1495,10 @@ void setup_GPS(void) {
   pinMode(ppsPin, INPUT_PULLUP);  // Set alarm pin as pullup
 }
 
+#define MAX_DRIFT_SECS_BEFORE_GPS_RESYNC 10
+// Predeclare
+time_t ds3231_unixtime(void);
+
 void update_GPS(void) {
   if (gps_micros != last_gps_micros) {
     last_gps_micros = gps_micros;
@@ -1494,8 +1511,13 @@ void update_GPS(void) {
   }
   if ((micros() - last_gps_micros) < 2000000) {
     if (!gps_active && set_time_on_gps_sync) {
-      // If we're transitioning to GPS active, and if enabled, auto-sync when GPS comes on.
-      request_RTC_sync = true;
+      // If we're transitioning to GPS active, and if enabled, auto-sync when GPS comes on
+      // if the clock time is significantly different from GPS time.
+      Serial.println("GPS transition to true");
+      if (abs((long)(gps_unixtime() - ds3231_unixtime())) > MAX_DRIFT_SECS_BEFORE_GPS_RESYNC) {
+        Serial.println("request GPS resync");
+        request_RTC_sync = true;
+      }
     }
     gps_active = true;
   } else {
@@ -1587,8 +1609,8 @@ const char *clock_name = "10M";
 
 uint8_t timer_sliceNum = 0;
 
-//uint32_t timer_count_max = 10000000;  // 10 million
-uint32_t timer_count_max = 9999999;  // 10 million - 1.  RP2040 Pico + Connor OCXO is 155 ppb slow
+uint32_t timer_count_max = 10000000;  // 10 million
+//uint32_t timer_count_max = 9999999;  // 10 million - 1.  RP2040 Pico + Connor OCXO is 155 ppb slow
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
 const uint32_t timer_default_pwmTop = (1L << 16);
@@ -1912,6 +1934,10 @@ class DateTime decode_time_from_regs(uint8_t *buffer) {
  return DateTime(bcd2bin(buffer[6]) + 2000U, bcd2bin(buffer[5] & 0x7F),
                  bcd2bin(buffer[4]), bcd2bin(buffer[2]), bcd2bin(buffer[1]),
                  bcd2bin(buffer[0] & 0x7F));
+}
+
+time_t ds3231_unixtime(void) {
+  return decode_time_from_regs(registers).unixtime();
 }
 
 void encode_time_to_regs(const DateTime& dt, uint8_t *buffer) {
@@ -2277,12 +2303,13 @@ void buttons_update(void) {
         if (long_press) {
           sleep_display();
         } else {
+          display_detail = !display_detail;
         }
         break;
       case 1:
         // Increase aging register
         if (long_press) {
-
+          dac_save_to_eeprom();
         } else {
           ds3231_delta_aging(1);
         }
