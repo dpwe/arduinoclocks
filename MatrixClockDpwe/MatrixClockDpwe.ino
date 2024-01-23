@@ -240,7 +240,13 @@ void setup() {
   // so back off ~14 compensation steps (to 86).
   // Then, by Aug 20, 2023, it was 15 sec slow
   // in about 135 days, so about -1.3 ppm, or advance 11 to 97.
-  Teensy3Clock.compensate(86);
+  // Then, by Nov 23, 2023, it was 19 sec slow
+  // in 94 days, so about -1.85 ppm, which would indicate advance 15
+  // but it looks like compensate is still at 86, so maybe back to ~100?
+  const int clock_compensate = 97;
+  Teensy3Clock.compensate(clock_compensate);
+  Serial.print("clock_compensate=");
+  Serial.println(clock_compensate);
 
   Serial.print("RTC_SR=");
   Serial.println(RTC_SR,HEX);

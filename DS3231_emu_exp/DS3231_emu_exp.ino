@@ -401,6 +401,17 @@ void display_skew_us(long int skew_microseconds);  // forward dec.
 // Modified by button 1, show/hide RTC detail
 bool display_detail = true;
 
+// Set when GPS syncs the time.
+time_t last_gps_sync_unixtime = 0;
+
+void itoa2(int num, char *s, int base = 10) {
+  // Convert a number to '00\0' or similar.
+#define DTOA(d) ((d < 10) ? ('0' + d) : ('A' + d - 10))
+  *s++ = DTOA(num / base);
+  *s++ = DTOA(num % base);
+  *s++ = '\0';
+}
+
 void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_active) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
@@ -508,6 +519,27 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
     itoa(100 * (t - int(t)), s_end + 1, 10);
     display.print(s);
     display.print("   ");
+  } else {
+    // Display time of last GPS sync
+    display.setCursor(0, 4 * ROW_H);
+    display.print("GPSSync: ");
+    char sbuf[16];
+    char *s = sbuf;
+    if (last_gps_sync_unixtime > 0) {
+      TimeSpan since_sync = TimeSpan(ds3231.now().unixtime() - last_gps_sync_unixtime);
+      itoa(since_sync.hours(), s, 10);
+      s += strlen(s);
+      *s++ = ':';
+      itoa2(since_sync.minutes(), s);
+      s += 2;
+      *s++ = ':';
+      itoa2(since_sync.seconds(), s);
+      s += 2;
+      *s = '\0';
+    } else {
+      strcpy(s, "none");
+    }
+    display.print(sbuf);
   }
 
 #ifdef DISPLAY_DISPLAY_CMD
@@ -634,13 +666,6 @@ void print2Digits(int digits, int base = 10) {
   if (digits < base)
     Serial.print('0');
   Serial.print(digits, base);
-}
-
-void itoa2(int num, char *s, int base = 10) {
-#define DTOA(d) ((d < 10) ? ('0' + d) : ('A' + d - 10))
-  *s++ = DTOA(num / base);
-  *s++ = DTOA(num % base);
-  *s++ = '\0';
 }
 
 void sprint_bits(uint8_t val, const char *names[8], char *s) {
@@ -1434,7 +1459,7 @@ time_t gps_unixtime(void) {
 }
 
 unsigned long last_gps_micros = 0;
-time_t last_gps_sync_unixtime = 0;
+//time_t last_gps_sync_unixtime = 0;
 
 void sync_time_from_GPS(void) {
   // This is called soon after an A1 transition is detected, so GPS unixtime is still current.
