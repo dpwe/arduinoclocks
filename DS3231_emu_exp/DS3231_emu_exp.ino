@@ -396,6 +396,8 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
 // Updated by main loop, used to display here.
 long int skew_us = 0;
 long int last_skew_us = 0;
+// Holds skew_us immediately after GPS sync.
+long int initial_skew_us = 0;
 void display_skew_us(long int skew_microseconds);  // forward dec.
 
 // Modified by button 1, show/hide RTC detail
@@ -403,6 +405,10 @@ bool display_detail = true;
 
 // Set when GPS syncs the time.
 time_t last_gps_sync_unixtime = 0;
+// Last time the GPS transitioned to available.
+DateTime last_gps_uptime;
+// Last time the GPS transitioned to not available.
+DateTime last_gps_downtime;
 
 void itoa2(int num, char *s, int base = 10) {
   // Convert a number to '00\0' or similar.
@@ -523,24 +529,67 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
     // Display time of last GPS sync
     display.setCursor(0, 4 * ROW_H);
     display.print("GPSSync: ");
-    char sbuf[16];
-    char *s = sbuf;
+    char *sp = s;
     if (last_gps_sync_unixtime > 0) {
-      TimeSpan since_sync = TimeSpan(ds3231.now().unixtime() - last_gps_sync_unixtime);
-      itoa(since_sync.hours(), s, 10);
-      s += strlen(s);
-      *s++ = ':';
-      itoa2(since_sync.minutes(), s);
-      s += 2;
-      *s++ = ':';
-      itoa2(since_sync.seconds(), s);
-      s += 2;
-      *s = '\0';
+      long int secs_since_sync = ds3231.now().unixtime() - last_gps_sync_unixtime;
+      TimeSpan since_sync = TimeSpan(secs_since_sync);
+      itoa(since_sync.days(), sp, 10);
+      sp += strlen(sp);
+      *sp++ = 'd';
+      *sp++ = ' ';
+      itoa(since_sync.hours(), sp, 10);
+      sp += strlen(sp);
+      *sp++ = ':';
+      itoa2(since_sync.minutes(), sp);
+      sp += 2;
+      *sp++ = ':';
+      itoa2(since_sync.seconds(), sp);
+      sp += 2;
+      *sp = '\0';
+      display.print(s);
+
+      // Figure PPB
+      // if long int is 32 bit, then largest value is ~2e9, so numerator will overflow
+      // when skew_us is 2e4 or 20 ms.
+      if (secs_since_sync < 10) initial_skew_us = skew_us;
+      long int ppb_times_100 = (100000L * (skew_us - initial_skew_us)) / secs_since_sync;
+      display.setCursor(0, 5 * ROW_H);
+      display.print("ppb: ");
+      if (ppb_times_100 < 0)  {
+        display.print("-");
+        ppb_times_100 = -ppb_times_100;
+      }
+      itoa(ppb_times_100 / 100, s, 10);
+      display.print(s);
+      display.print(".");
+      itoa2(ppb_times_100 % 100, s);
+      s[2] = '\0';
+      display.print(s);
+      
     } else {
-      strcpy(s, "none");
+      display.print("none");
     }
-    display.print(sbuf);
-  }
+    
+    display.setCursor(0, 6 * ROW_H);
+    display.print("GPSUp: ");
+    if (!last_gps_uptime.secondstime()) {
+        strcpy(s, "none");
+    } else {
+        strcpy(s, "MM-DD hh:mm:ss");
+        last_gps_uptime.toString(s);
+    }    
+    display.print(s);
+    
+    display.setCursor(0, 7 * ROW_H);
+    display.print("GPSDn: ");
+    if (!last_gps_downtime.secondstime()) {
+        strcpy(s, "none");
+    } else {
+        strcpy(s, "MM-DD hh:mm:ss");
+        last_gps_downtime.toString(s);
+    }    
+    display.print(s);
+}
 
 #ifdef DISPLAY_DISPLAY_CMD
   display.display();
@@ -1042,6 +1091,7 @@ int32_t predelay_trim_us = 0;
 
 // Predeclare flag for triggering sync.
 bool request_RTC_sync = false;
+bool record_GPS_uptime = false;
 
 // Predeclare display timeout val.
 //uint32_t display_sleep_timeout_secs = 300;
@@ -1533,19 +1583,27 @@ void update_GPS(void) {
       sync_time_from_GPS();
       request_RTC_sync = false;
     }
+    if (record_GPS_uptime) {
+      last_gps_uptime = gps_now(gps);
+      record_GPS_uptime = false;
+    }
   }
   if ((micros() - last_gps_micros) < 2000000) {
-    if (!gps_active && set_time_on_gps_sync) {
-      // If we're transitioning to GPS active, and if enabled, auto-sync when GPS comes on
-      // if the clock time is significantly different from GPS time.
+    if (!gps_active && gps_time_valid(gps)) {
       Serial.println("GPS transition to true");
-      if (abs((long)(gps_unixtime() - ds3231_unixtime())) > MAX_DRIFT_SECS_BEFORE_GPS_RESYNC) {
+      record_GPS_uptime = true;
+      if (set_time_on_gps_sync &&
+          abs((long)(gps_unixtime() - ds3231_unixtime())) > MAX_DRIFT_SECS_BEFORE_GPS_RESYNC) {
+        // We're transitioning to GPS active, and we enabled auto-sync when GPS comes on
+        // if the clock time is significantly different from GPS time.
         Serial.println("request GPS resync");
         request_RTC_sync = true;
       }
+      gps_active = true;
     }
-    gps_active = true;
   } else {
+    // More than 2 sec since last GPS time reported.
+    if (gps_active)  last_gps_downtime = ds3231.now();
     gps_active = false;
   }
 }
