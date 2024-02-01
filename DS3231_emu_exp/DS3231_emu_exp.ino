@@ -929,6 +929,7 @@ bool dac_available = false;
 int dac_a_value = 1500;  // about 20 counts per (us per 100s, or 1e-8), so 2 counts = 1ppb
 // for 10^7-1 counts per sec, DAC=1892 ended up 1.3 ppb fast
 // for 10^7 counts per sec, DAC=2056 was pretty flat
+// 2024-01-28: After 40h, clock reported -2.20 ppb (i.e, fast), so reduced DAC to 2053.
 // so ? 164 DAC for 100 ppb
 
 void dac_set_value(int value) {

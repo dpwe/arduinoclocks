@@ -1,3 +1,5 @@
+#include <RTClib.h>
+
 /*
  *  glcd_clock (based on openGLCD Library)
  *  
@@ -14,6 +16,12 @@
  *    - DS3231 SCL on A5
  *    - DS3231 SQWV on D2 (interrupt-capable).
  */
+
+void assert(bool) {
+  // nothing.
+}
+
+typedef long unsigned int time_t;
 
 typedef unsigned long time_t;
 #include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
@@ -55,7 +63,19 @@ Timezone myTZ(myDST, mySTD);
 
 RTC_DS3231 rtc;
 
-time_t now_local(void) {
+void sprint_datetime(const DateTime &dt, char *s) {
+  // s must have 20 bytes.
+  strcpy(s, "YYYY-MM-DD hh:mm:ss");
+  dt.toString(s);
+}
+
+void serial_print_time(const DateTime &dt) {
+  char s[20];
+  sprint_datetime(dt, s);
+  Serial.println(s);
+}
+
+unsigned long int now_local(void) {
   // Like now(), but includes timezone modification.
   return myTZ.toLocal(rtc.now().unixtime());
 }
@@ -72,12 +92,22 @@ void setup_RTC(void) {
   Serial.println("RTC OK");
 }
 
+void RTC_set_time(const DateTime &dt) {
+  // Set the DS3231 time.
+  Serial.print("Set RTC: ");
+  serial_print_time(dt);
+  rtc.adjust(dt);
+  // Resync TimeLib
+  //setTime(ds3231.now().unixtime());
+}
+
 //------------------------
 // Display
 //------------------------
 
 void setup_display(void) {
   // Initialize the GLCD 
+
   GLCD.Init();
 
   // Set text area to be more centered.
@@ -150,7 +180,7 @@ void update_display(const DateTime& dt) {
 
 // Config for backlight day/night mode.
 const int light_low = 32;
-const int light_high = 255;
+int backlight_brightness = 255;
 const int hour_up = 7;
 const int hour_down = 22;
 
@@ -167,7 +197,7 @@ int target_brightness = 0;
 void update_backlight_time(int hour) {
   target_brightness = light_low;
   if (hour >= hour_up && hour < hour_down) {
-    target_brightness = light_high;
+    target_brightness = backlight_brightness;
   }
 }
 
@@ -194,14 +224,226 @@ void update_backlight() {
   }
 }
 
+// ---------------------- CLI -----------------------------------------
+// Input commands over serial line
+
+void cmd_setup(void) {
+  // Nothing to do?
+  cmd_prompt();
+}
+
+byte atoi2(char *s) {
+  // Convert two ascii digits to a uint8.
+  return (s[1] - '0') + 10 * (s[0] - '0');
+}
+
+bool atob(char *s) {
+  // Convert len-1 string to boolean.
+  if (strlen(s) != 1 || (s[0] != '0' and s[0] != '1')) {
+    Serial.print("Arg ");
+    Serial.print(s);
+    Serial.println(" is not 0 or 1.");
+  }
+  return (s[0] == '1');
+}
+
+uint32_t htoi(char *s) {
+  // Convert hex string to unsigned long int.
+  uint32_t val = 0;
+  while (*s) {
+    uint8_t v = (*s) - '0';
+    if (v > 9) v -= 'A' - '0' + 10;
+    if (v > 15) v -= 'a' - 'A';
+    ++s;
+    val = (val << 4) + v;
+  }
+  return val;
+}
+
+int parse_string_to_mins(char *mins_string) {
+  // Convert a string like "2359" into minutes since midnight (1439 in this case)
+  if (strlen(mins_string) != 4) {
+    Serial.println("Error: cmd arg string is not 4 chrs.");
+    return -1;
+  }
+  int hours = atoi2(mins_string);
+  int minutes = atoi2(mins_string + 2);
+  return 60 * hours + minutes;
+}
+
+DateTime parse_time_string(char *time_string) {
+  // time_string must point to exactly 14 chars in format YYYYMMDDHHMMSS.
+  DateTime dt;
+  if (time_string[0] != '2' or time_string[1] != '0') {
+    Serial.println("Warn: Year does not start with 20...");
+  }
+  // YYYY, MM, DD,
+  // hh, mm, ss
+  return DateTime(2000 + atoi2(time_string + 2), atoi2(time_string + 4), atoi2(time_string + 6),
+                  atoi2(time_string + 8), atoi2(time_string + 10), atoi2(time_string + 12));
+}
+
+void print_enabled_disabled(const char *s, int v) {
+  Serial.print(s);
+  Serial.print(" ");
+  if (v == 0) Serial.println("disabled.");
+  else Serial.println("enabled.");
+}
+
+DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm = 1) {
+  // hhmmss at the end of the arg.
+  uint8_t ix = strlen(arg);
+  uint8_t day = 1;
+  uint8_t hr = 0;
+  uint8_t min = 0;
+  uint8_t sec = 0;
+  uint8_t mode = DS3231_A1_Second;
+  bool daynotdate = false;
+  if (alarm == 1) {
+    // No sec for alarm 2
+    sec = atoi2(arg + ix - 2);
+    ix -= 2;
+  }
+  if (ix >= 2) {
+    min = atoi2(arg + ix - 2);
+    mode = DS3231_A1_Minute;
+    ix -= 2;
+  }
+  if (ix >= 2) {
+    hr = atoi2(arg + ix - 2);
+    mode = DS3231_A1_Hour;
+    ix -= 2;
+  }
+  if (ix == 1) {
+    // Weekday.
+    daynotdate = true;
+    day = 1 + (arg[ix - 1] - '0' + 6) % 7;  // 1 (Mon) .. 7 (Sun).
+    mode = DS3231_A1_Day;
+  } else if (ix == 2) {
+    // Day of month
+    day = atoi2(arg + ix - 2);
+    mode = DS3231_A1_Date;
+  } else if (ix != 0) {
+    Serial.print("Alarm set misparse - ");
+    Serial.println(arg);
+  }
+  if (alarm == 2) {
+    // Alarm2 modes are shifted down 1 bit compared to Alarm1.
+    mode >>= 1;
+  }
+  *pmode = mode;
+  // Following RTC_DS3231, the May 2000 started on a Monday, so date == DoW.
+  return DateTime(2000, 5, day, hr, min, sec);
+}
+
+void cmd_prompt() {
+  Serial.println("***Cmd: Zxxx");
+  //Serial.flush();
+}
+
+// Macro to set or clear bits specified by bitmask in a register.
+#define SET_BIT_IN_REG_TO(reg, bitmask, val) \
+  if (val) reg |= (bitmask); \
+  else reg &= ~(bitmask);
+
+const int16_t ds3231_freqs[4] = { 1, 1024, 4096, 8192 };
+
+// Trim subtracted from predelay on GPS sync.
+int32_t predelay_trim_us = 0;
+
+
+void handle_cmd(char cmd, char *arg) {
+  // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
+  // Number of characters in argument.
+  uint8_t ctrl, status;  // In case we need them.
+  bool b;                // In case we need it.
+  int value;             // In case we need it.
+  DateTime dt;           // In case we need it.
+  char s[64];            // In case we need it.
+  uint8_t regs[19];      // In case we need it.
+  int alen = strlen(arg);
+  switch (cmd) {
+
+
+    case 'O':
+      // Set active backlight brightness
+      if (alen) {
+        backlight_brightness = atoi(arg);
+      }
+      Serial.print("Backlight brightness (0..255)=");
+      Serial.println(backlight_brightness);
+      break;
+
+
+    case 'Z':
+      // Set date/time: Z20211118094000 - 2021-11-18 09:40:00.
+      if (alen) {
+        if (alen != 14) {
+          Serial.println("Bad format - Zyyyymmddhhmmss");
+        } else {
+          dt = DateTime(parse_time_string(arg));
+          RTC_set_time(dt);
+        }
+      }
+      serial_print_time(rtc.now());
+      break;
+  }
+}
+
+#define CMD_BUF_LEN 32
+char cmd_buffer[CMD_BUF_LEN];
+int cmd_len = 0;
+
+void cmd_update(void) {
+  int value;
+  if (Serial.available() > 0) {
+    // read the incoming byte:
+    char new_char = Serial.read();
+    if (new_char == '\n' || new_char == '\r') {
+      // handle command.
+      cmd_buffer[cmd_len] = '\0';
+      if (cmd_len > 0) {
+        byte cmd0 = cmd_buffer[0];
+        if (cmd0 >= 'a') cmd0 -= ('a' - 'A');
+        handle_cmd(cmd0, cmd_buffer + 1);
+        // Reprint command prompt.
+        cmd_prompt();
+        // Interaction just happened - tickle screensaver.
+        //sleep_tickle();
+      }
+      cmd_len = 0;
+    } else {
+      if (cmd_len < CMD_BUF_LEN) {
+        cmd_buffer[cmd_len++] = new_char;
+      }
+    }
+  }
+}
+
 // -------------------------
 // Main
 // -------------------------
+#define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
+bool serial_available = false;
+void open_serial(int baudrate=9600) {
+  Serial.begin(baudrate);
+  // Wait for Serial port to open
+  int i = 0;
+  while (!Serial) {
+    delay(10);
+    ++i;
+    if (i > MAXWAIT_SERIAL) break;
+  }
+  if (i <= MAXWAIT_SERIAL) {
+    serial_available = true;
+  }
+  delay(1000);
+}
 
 void setup()
 {
-  Wire.begin();
-  Serial.begin(9600);
+  open_serial();
+
   Serial.println("glcd_clock");
 
   setup_RTC();
@@ -209,6 +451,8 @@ void setup()
   setup_backlight();
 
   setup_display();
+
+  cmd_setup();
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
@@ -228,5 +472,6 @@ void loop()
   }
   // Backlight update is at full-speed, not 1 Hz.
   update_backlight();
+  cmd_update();
   delay(10);
 }
