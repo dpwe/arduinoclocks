@@ -2323,7 +2323,7 @@ void sleep_tickle(void) {
   #ifdef MY_PICO_RP2040_LCD
     int button_pins[NUM_BUTTONS] = {20, 21, 22};
   #else
-    int 10_pins[NUM_BUTTONS] = {18, 19, 20};
+    int button_pins[NUM_BUTTONS] = {18, 19, 20};
   #endif
 #endif
 #else

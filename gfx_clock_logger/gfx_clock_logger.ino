@@ -21,10 +21,11 @@ bool serial_available = false;
 //#define TEMP_SHT4x
 #define TEMP_DS3231
 
+const int MINS_PER_DAY = 1440;
 const int LOG_DATA_LEN = 120;     // One value per pixel, roughly.
-const int LOG_INTERVAL_MINS = 12;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
-const int LOG_MAX_TIME_PERIOD = 1440;  // Make sure we roll-over correctly.
-const int SUBDIV_MINS = (30 * LOG_INTERVAL_MINS);  // Where the vertical lines occur
+const int LOG_INTERVAL_SECS = 12 * 60;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const int LOG_MAX_TIME_PERIOD = MINS_PER_DAY * 60;  // Make sure we roll-over correctly.
+const int SUBDIV_MINS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines occur
 
 //#include <Arduino.h>
 
@@ -75,6 +76,7 @@ const int SUBDIV_MINS = (30 * LOG_INTERVAL_MINS);  // Where the vertical lines o
   const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight (NOTUSED)
   #define BGCOLOR 0x0847E6  // yellow-green
   #define FGCOLOR 0
+  #define SLEEP_TIMEOUT_SECS 0  // no timeout for LCD.
 #endif
 #ifdef DISPLAY_SH1107
   #warning DISPLAY_SH1107
@@ -92,7 +94,11 @@ const int SUBDIV_MINS = (30 * LOG_INTERVAL_MINS);  // Where the vertical lines o
   #define DISPLAY_DISPLAY_CMD
   #define BGCOLOR SH110X_BLACK
   #define FGCOLOR SH110X_WHITE
+  #define SLEEP_TIMEOUT_SECS 300
 #endif
+
+// Predeclare display timeout val.
+uint32_t display_sleep_timeout_secs = SLEEP_TIMEOUT_SECS;
 
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
 
@@ -322,13 +328,13 @@ void serial_print_tm(const tmElements_t &tm)
 // -------------------
 
 uint8_t log_data[LOG_DATA_LEN];
-int log_times[LOG_DATA_LEN];
+time_t log_times[LOG_DATA_LEN];
 int data_min = 70;
 int data_max = 75;
 
 #define INVALID_TIME (-1)
 
-void init_data(int init_val, int init_time) {
+void init_data(int init_val, time_t init_time) {
   for (int i = 0; i < LOG_DATA_LEN; ++i) {
     log_data[i] = init_val;
     log_times[i] = init_time;
@@ -336,7 +342,7 @@ void init_data(int init_val, int init_time) {
   set_min_max(log_data, log_times, LOG_DATA_LEN, &data_min, &data_max);
 }
 
-void set_min_max(uint8_t *log_data, int *data_valid, int log_data_len, int *pdata_min, int *pdata_max) {
+void set_min_max(uint8_t *log_data, time_t *data_valid, int log_data_len, int *pdata_min, int *pdata_max) {
   int data_min = 0;
   int data_max = 0;
   bool seen_valid_data = false;
@@ -367,7 +373,7 @@ void update_most_recent_data(uint8_t new_data) {
   }
 }
 
-void push_data(uint8_t new_data, int new_time) {
+void push_data(uint8_t new_data, time_t new_time) {
   // Move forward data
   if (serial_available) {
      Serial.print("new_data: ");
@@ -383,10 +389,10 @@ void push_data(uint8_t new_data, int new_time) {
   set_min_max(log_data, log_times, LOG_DATA_LEN, &data_min, &data_max);
 }
 
-int last_log_time = 0;
+time_t last_log_time = 0;
 
-void update_logger(int data_val, int data_time) {
-  if ( (data_time - last_log_time + LOG_MAX_TIME_PERIOD) % LOG_MAX_TIME_PERIOD >= LOG_INTERVAL_MINS) {
+void update_logger(int data_val, time_t data_time) {
+  if ( (data_time - last_log_time + LOG_MAX_TIME_PERIOD) % LOG_MAX_TIME_PERIOD >= LOG_INTERVAL_SECS) {
     // Time to log a new value.
     last_log_time = data_time;
     // Record new temperature every minute.
@@ -530,8 +536,8 @@ void setup_display(void) {
 #endif
 #ifdef DISPLAY_SH1107
   display.begin(display_address, true);
-  display.display();  // Splashscreen
-  delay(1000);
+  //display.display();  // Splashscreen
+  //delay(1000);
   display.clearDisplay();
   display.display();
   Serial.println("SH1107 started");
@@ -646,7 +652,7 @@ void draw_log_output(int x, int y, int w, int h) {
   uint8_t last_data = 0;
   uint8_t first_x = 0;
   uint8_t first_y = 0;
-  int first_time = INVALID_TIME;
+  time_t first_time_mins = INVALID_TIME;
   int8_t last_quarter_day = -1;
   for (int i = 0; i < LOG_DATA_LEN; ++i) {
     last_data = log_data[i];
@@ -657,7 +663,7 @@ void draw_log_output(int x, int y, int w, int h) {
         display.drawLine(last_x, last_y, new_x, new_y, fgcolor);
       }
       // Add vertical lines every 6h transition.
-      int8_t quarter_day = log_times[i] / SUBDIV_MINS;
+      int8_t quarter_day = ((log_times[i] / 60) / SUBDIV_MINS) % 128;
       if (quarter_day != last_quarter_day) {
         if (last_quarter_day >= 0) {
           display.drawLine(new_x, y, new_x, y + h, fgcolor);
@@ -673,8 +679,8 @@ void draw_log_output(int x, int y, int w, int h) {
       last_x = new_x;
       last_y = new_y;
       last_x_valid = true;
-      if (first_time == INVALID_TIME) {
-        first_time = log_times[i];
+      if (first_time_mins == INVALID_TIME) {
+        first_time_mins = (log_times[i] / 60) % MINS_PER_DAY;
         first_x = last_x;
         first_y = last_y;  // Needed to position earliest timestamp below.
       }
@@ -691,7 +697,7 @@ void draw_log_output(int x, int y, int w, int h) {
     // Only draw first_time if it doesn't impinge on legend at left.
     int first_time_x = first_x - (4 * MICROFONT_W + 1);
     if (first_time_x >= data_x) {
-      draw_time(first_time_x, first_y + y_offset, first_time);
+      draw_time(first_time_x, first_y + y_offset, first_time_mins);
     }
     // Label current value.
     y_offset = y_offset_per_data(last_y, mid_y);
@@ -732,7 +738,7 @@ void sprint_date(class DateTime& dt, char* datestr) {
   *s++ = '\0'; 
 }
 
-int update_display(time_t t) {
+int update_display(time_t t, uint8_t redraw=false) {
   // Returns minutes within day (0..1440).
   //u8g2.clearBuffer();   // for _F_ initializer only
   //display.fillScreen(bgcolor);
@@ -742,7 +748,7 @@ int update_display(time_t t) {
   breakTime(t, tm);
   serial_print_tm(tm);
   int mins_within_day = 60 * tm.Hour + tm.Minute;
-  if (tm.Day != last_day) {
+  if (redraw || tm.Day != last_day) {
     last_day = tm.Day;
     char datestr[24];
     strcpy(datestr, datefmt);
@@ -776,12 +782,12 @@ int update_display(time_t t) {
   }
   // Bar width goes from 1 to 60 (instead of 0 to 59)
   uint8_t bar_width = secs_x_scale * (1 + prev_second);
-  if (prev_minute & 1) {
-    // bar shrinking to right
-    display.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
-  } else {
+  if (redraw || (prev_minute & 1) == 0) {
     // bar growing from left
     display.fillRect(base_x, base_y, bar_width, secs_height, fgcolor);
+  } else {
+    // bar shrinking to right
+    display.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
   }
 
   // Logging plot setup
@@ -794,14 +800,14 @@ int update_display(time_t t) {
   display.setFont(CalBlk36);
   char digit_string[3];
   //mid_x -= big_colon_width;
-  if (tm.Hour != last_hour) {
+  if (redraw || tm.Hour != last_hour) {
     last_hour = tm.Hour;
     sprint_int2(digit_string, tm.Hour);
     digit_string[2] = '\0';
     print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, 
                RIGHT, MIDDLE, digits_width, digits_height, false,  digits_baseline_shift);
   }
-  if (tm.Minute != last_minute) {
+  if (redraw || tm.Minute != last_minute) {
     last_minute = tm.Minute;
     sprint_int2(digit_string, tm.Minute);
     digit_string[2] = '\0';
@@ -821,6 +827,171 @@ int update_display(time_t t) {
 #endif
 
   return mins_within_day;
+}
+
+// ------------- Display sleep (screensaver) -----------
+
+// Moved up for CLI access
+bool display_on = true;
+
+int backlight_brightness = 0;
+
+void wake_up_display(void) {
+  Serial.println("wake_display");
+#ifdef DISPLAY_BACKLIGHT
+  // turn on backlite
+  analogWrite(backlightPin, backlight_brightness);
+#endif
+  display_on = true;
+  setup_display();
+  update_display(now_local(), /* redraw= */ true);
+}
+
+void sleep_display(void) {
+  Serial.println("sleep_display");
+#ifdef DISPLAY_DISPLAY_CMD
+  display.clearDisplay();
+  display.display();
+#else
+  display.fillScreen(BLACK);
+#endif
+#ifdef DISPLAY_BACKLIGHT
+  // turn off backlite
+  analogWrite(backlightPin, 0);
+#endif
+  display_on = false;
+}
+
+// Sleep display after 5 mins.
+//uint32_t display_sleep_timeout_secs = 300;
+// forward-declared above serial command block.
+uint32_t millis_last_action = 0;
+
+void sleep_update(void) {
+  // Check the time and sleep display if we've been idle.
+  // We use millis since ds3231 time may be changing.
+  if (millis_last_action && display_sleep_timeout_secs 
+      && (millis() - millis_last_action) > 1000 * display_sleep_timeout_secs) {
+    if (display_on) {
+      sleep_display();
+    }
+  }
+}
+
+void sleep_tickle(void) {
+  // Reset display sleep countdown.
+  //Serial.print("tickle: display_on=");
+  //Serial.println(display_on);
+  millis_last_action = millis();
+  if (!display_on) {
+    wake_up_display();
+  }
+}
+
+// ======================================================
+// =========== Button management ==============
+// ======================================================
+
+#define NUM_BUTTONS 3  // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
+#ifdef ARDUINO_ARCH_RP2040
+#ifdef FEATHER_RP2040  // i.e., this is a Feather RP2040
+    int button_pins[NUM_BUTTONS] = {9, 8, 7};
+#warning "Feather RP2040"
+#else  // RP2040 Pico
+  #ifdef MY_PICO_RP2040_LCD
+    int button_pins[NUM_BUTTONS] = {20, 21, 22};
+  #else
+    int button_pins[NUM_BUTTONS] = {18, 19, 20};
+  #endif
+#endif
+#else
+  int button_pins[NUM_BUTTONS] = {9, 6, 5};
+#endif
+int button_state[NUM_BUTTONS] = {0, 0, 0};
+unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
+// For distinguishing short/long press
+int button_down_time = 0;
+
+// Keeping track of user interaction to control display sleep.
+long secs_last_action = 0;
+
+#define DEBOUNCE_MILLIS 50
+#define MILLIS_LONG_PRESS 500
+
+void buttons_setup(void) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    pinMode(button_pins[button], INPUT_PULLUP);
+  }
+  sleep_tickle();
+}
+
+void buttons_update(void) {
+  for (int button = 0; button < NUM_BUTTONS; ++button) {
+    // Buttons are pulled up, so read as 1 when open, 0 when pressed.
+    int new_state = 1 - digitalRead(button_pins[button]);
+    if (button_state[button] == new_state) {
+      continue;
+    }
+    // State has changed.
+    unsigned long millis_now = millis();
+    unsigned long millis_since_last_change = millis_now - button_last_change_time[button];
+    button_last_change_time[button] = millis_now;
+    if (millis_since_last_change <= DEBOUNCE_MILLIS) {
+      continue;
+    }
+    // Debounced state change
+    button_state[button] = new_state;
+    if (new_state) {
+      // State changed to "pressed"
+      button_down_time = millis_now;
+      continue;
+    }
+    // State change was to "released".
+    bool long_press = (millis_now - button_down_time) > MILLIS_LONG_PRESS;
+    Serial.print("Button ");
+    Serial.print(button);
+    if (long_press) {
+      Serial.println(" long press");
+    } else {
+      Serial.println(" short press");
+    }
+    // Action - tickle the screensaver.
+    if (!display_on) {
+      sleep_tickle();  // also wakes the display.
+      // But otherwise ignore the press.
+      return;
+    }
+    sleep_tickle();
+    switch(button) {
+      case 0:
+        if (long_press) {
+          sleep_display();
+        } else {
+          //display_detail = !display_detail;
+        }
+        break;
+      case 1:
+        // Increase aging register
+        if (long_press) {
+          //dac_save_to_eeprom();
+        } else {
+          //ds3231_delta_aging(1);
+        }
+        break;
+      case 2:
+        if (long_press) {
+          // Long press syncs to GPS
+          //request_RTC_sync = true;
+          //Serial.print("gps_micros=");
+          //Serial.print(gps_micros);
+          //Serial.print(" last_gps_micros=");
+          //Serial.println(last_gps_micros);
+        } else {
+          //ds3231_delta_aging(-1);
+        }
+        break;
+    }
+  }
 }
 
 // -------------------------------------------------------------------
@@ -939,13 +1110,21 @@ void cmd_update(void) {
             break;
           case 'B':
             // Set backlight color to RRGGBB in hex.
-            uint32_t brightness = htoi(cmd_buffer + 1);
-            //set_backlight_color(brightness);
+            backlight_brightness = htoi(cmd_buffer + 1);
+            //set_backlight_color(backlight_brightness);
 #ifdef BACKLIGHT
-            analogWrite(backlightPin, brightness);
+            analogWrite(backlightPin, backlight_brightness);
 #endif
             Serial.print("new color=");
-            Serial.println(brightness);
+            Serial.println(backlight_brightness);
+            break;
+          case 'X':
+            // Set/read display sleep timeout in secs.
+            if (cmd_buffer[1]) {
+              display_sleep_timeout_secs = atoi(cmd_buffer + 1);
+            }
+            Serial.print("Display sleep (sec, 0=disabled)=");
+            Serial.println(display_sleep_timeout_secs);
             break;
         }
       }
@@ -968,13 +1147,13 @@ const int light_high = 64;
 const int hour_up = 7;
 const int hour_down = 22;
 
-int brightness = 0;
+//int backlight_brightness = 0;
 
 void setup_backlight(void) {
   // Backlight
 #ifdef BACKLIGHT
   pinMode(backlightPin, OUTPUT);  // sets the pin as output
-  analogWrite(backlightPin, brightness);
+  analogWrite(backlightPin, backlight_brightness);
 #endif
 }
 
@@ -995,14 +1174,14 @@ void update_backlight(int hour) {
   if (++bright_tick >= ticks_per_step) {
     // Slow down the brightness change steps.
     bright_tick = 0;
-    int bright_delta = target_brightness - brightness;
+    int bright_delta = target_brightness - backlight_brightness;
     if (bright_delta) {
-      brightness += (bright_delta >> 6) + sgn(bright_delta);
+      backlight_brightness += (bright_delta >> 6) + sgn(bright_delta);
 #ifdef BACKLIGHT
-      analogWrite(backlightPin, brightness);
+      analogWrite(backlightPin, backlight_brightness);
       if (serial_available) {
         //Serial.print("brightness=");
-        //Serial.println(brightness);
+        //Serial.println(backlight_brightness);
       }
 #endif // BACKLIGHT
     }
@@ -1093,6 +1272,8 @@ void setup()
   Serial.println("done logger");
   cmd_setup();
   Serial.println("done cmd");
+
+  buttons_setup();
 }
 
 //time_t current_now = 60 * (9 * 60 + 50);
@@ -1111,11 +1292,13 @@ void loop()
     ledState = !ledState;
     digitalWrite(ledPin, ledState);
     current_now = now_local();
-    int mins_within_day = update_display(current_now);
-    update_logger(read_temp_F(), mins_within_day);
+    if (display_on)
+        update_display(current_now);
+    update_logger(read_temp_F(), current_now);
   }
 #endif
   cmd_update();
+  buttons_update();
   update_backlight(hour(current_now));
   delay(50);
 }
