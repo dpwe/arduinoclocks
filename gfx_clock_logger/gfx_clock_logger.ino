@@ -22,8 +22,7 @@ bool serial_available = false;
 #define TEMP_DS3231
 
 const int LOG_DATA_LEN = 120;     // One value per pixel, roughly.
-//const int LOG_INTERVAL_MINS = 12;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
-const int LOG_INTERVAL_MINS = 1;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const int LOG_INTERVAL_MINS = 12;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
 const int LOG_MAX_TIME_PERIOD = 1440;  // Make sure we roll-over correctly.
 const int SUBDIV_MINS = (30 * LOG_INTERVAL_MINS);  // Where the vertical lines occur
 
@@ -666,7 +665,7 @@ void draw_log_output(int x, int y, int w, int h) {
           int vert_line_legend_x = new_x - (2 * MICROFONT_W);
           // Don't draw if it's going to splay off the left.
           if (vert_line_legend_x >= data_x) {
-            draw_time(vert_line_legend_x, y - 1, quarter_day * SUBDIV_MINS, /* show_minutes= */ false);
+            draw_time(vert_line_legend_x, y - 1 + MICROFONT_H, quarter_day * SUBDIV_MINS, /* show_minutes= */ false);
           }
         }
         last_quarter_day = quarter_day;
@@ -717,7 +716,7 @@ char dow_names[] = "SunMonTueWedThuFriSat";
 
 void sprint_date(class DateTime& dt, char* datestr) {
   // Fake dt.toString for our format.  Pad each end with spaces to get proper clearing of previous.
-  int dow = dt.dayOfTheWeek();
+  int dow = (dt.dayOfTheWeek() - 1) % 7;  // WTF???
   char *s = datestr;
   *s++ = ' ';
   for (int i = 0; i < 3; ++i) {
@@ -748,7 +747,8 @@ int update_display(time_t t) {
     char datestr[24];
     strcpy(datestr, datefmt);
     DateTime dt(t);
-    sprint_date(dt, datestr);
+    //dt.toString(datestr);
+    sprint_date(dt, datestr);    
     // Date.
     display.setFont(SMALLFONT);
     int16_t  x1, y1;
