@@ -1257,7 +1257,9 @@ void handle_cmd(char cmd, char *arg) {
       if (alen) {
         backlight_brightness = atoi(arg);
         if (display_on) {
+#ifdef DISPLAY_BACKLIGHT
           analogWrite(backlightPin, backlight_brightness);
+#endif
         }
       }
       Serial.print("Backlight brightness (0..255)=");

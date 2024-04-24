@@ -8,6 +8,8 @@
  * 
  */
 
+#include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
+
 // Enable serial monitor?
 // When enabled, boot will hang if we *don't* have a computer attached (i.e., just USB power)
 #define USE_SERIAL
@@ -19,29 +21,81 @@ bool serial_available = false;
 //#define TEMP_SHT4x
 #define TEMP_DS3231
 
-// Do we use the backlight?
-#define BACKLIGHT
-
 const int LOG_DATA_LEN = 120;     // One value per pixel, roughly.
-const int LOG_INTERVAL_MINS = 12;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+//const int LOG_INTERVAL_MINS = 12;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const int LOG_INTERVAL_MINS = 1;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
 const int LOG_MAX_TIME_PERIOD = 1440;  // Make sure we roll-over correctly.
 const int SUBDIV_MINS = (30 * LOG_INTERVAL_MINS);  // Where the vertical lines occur
 
 //#include <Arduino.h>
 
 #include <Adafruit_GFX.h>    // Core graphics library
-#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
 #include <SPI.h>
 
+#ifdef ARDUINO_ARCH_RP2040
+  #ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
+    #define FEATHER_RP2040
+    #define FEATHER_OLED
+    #warning FEATHER_RP2040
+  #else
+    #define MY_PICO_RP2040
+    #define MY_PICO_RP2040_LCD  // Alternate RP2040 pinout for 3" LCD on SPI
+    #warning PICO_RP2040
+  #endif
+  #ifdef MY_PICO_RP2040_LCD
+    #define DISPLAY_ST7920  // 128x64 green-yellow LCD matrix
+  #else  // FEATHER_RP2040
+    #define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+  #endif
+  //const int int_sda_pin = 2;
+  //const int int_scl_pin = 3;
+  const uint8_t sqwPin = 29;  // (A3)
+  const int ext_sda_pin = 24;
+  const int ext_scl_pin = 25;
+  #define INT_I2C Wire
+  #define EXT_I2C Wire1
+#else
+  // ESP32-S3
+  #define INT_I2C Wire
+  #define EXT_I2C Wire1
+  #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+  // ESP32-S3 TFT - Expect SQWV input on 2 (external).
+  const uint8_t sqwPin = A3;
+  const int ext_sda_pin = A4;
+  const int ext_scl_pin = A5;
+#endif
+
 // Use dedicated hardware SPI pins
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+#ifdef DISPLAY_ST7789
+  #warning DISPLAY_ST7789
+  #include <Adafruit_ST7789.h>
+  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+  // Ue the backlight.
+  #define BACKLIGHT
+  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight (NOTUSED)
+  #define BGCOLOR 0x0847E6  // yellow-green
+  #define FGCOLOR 0
+#endif
+#ifdef DISPLAY_SH1107
+  #warning DISPLAY_SH1107
+  #include <Adafruit_SH110X.h>
+  #ifdef FEATHER_OLED
+    const int display_address = 0x3C;
+    #define SCREEN_HEIGHT 64
+  #else  // standalone OLED
+    const int display_address = 0x3D;
+    #define SCREEN_HEIGHT 128
+  #endif
+  #define SCREEN_WIDTH 128
+  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
+  // SH1107 needs display.display() after drawing
+  #define DISPLAY_DISPLAY_CMD
+  #define BGCOLOR SH110X_BLACK
+  #define FGCOLOR SH110X_WHITE
+#endif
 
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
-
-// Pin 2 is I2C CLK on FEATHER_M4, so use 4 to catch the DS3231 interrupts. (NOTUSED)
-const int sqwPin = A1; // The number of the pin for monitor alarm status on DS3231
-
-const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight (NOTUSED)
 
 volatile unsigned long rtc_micros = 0;
 volatile bool pending_RTC_interrupt = false;
@@ -64,7 +118,6 @@ void setup_interrupts() {
 // Track RTC times.
 // ======================================================
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
-#include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
 
 #include <Timezone.h>       // https://github.com/JChristensen/Timezone
 // US Eastern Time Zone (New York, Detroit)
@@ -76,7 +129,7 @@ Timezone myTZ(myDST, mySTD);
 //RTC_DS3231 ds3231;
 #include <DS3231.h>
 #include <TimeLib.h>        // https://www.pjrc.com/teensy/td_libs_DS1307RTC.html
-DS3231 ds3231;
+DS3231 ds3231(EXT_I2C);
 
 RTClib RTC;
 
@@ -88,7 +141,8 @@ time_t RTC_utc_get(void) {
 
 time_t now_local(void) {
   // Like now(), but includes timezone modification.
-  return myTZ.toLocal(now());
+  //return myTZ.toLocal(now());
+  return myTZ.toLocal(ds3231_now());
 }
 
 void RTC_set_time(const tmElements_t& tm) {
@@ -104,6 +158,42 @@ void RTC_set_time(const tmElements_t& tm) {
   // Resync TimeLib
   //setTime(tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tm.Year);
   setTime(RTC_utc_get());
+}
+
+char *itoa2(int num, char *s, int base=10) {
+#define DTOA(d) ((d < 10) ? ('0' + d) : ('A' + d - 10))
+  char *my_s = s;
+  *my_s++ = DTOA(num / base);
+  *my_s++ = DTOA(num % base);
+  *my_s++ = '\0';
+  return s;  // Is this the return?
+}
+
+char *format_tm(const tmElements_t &tm, char *s) {
+  char *s_in = s;
+  itoa(1970 + tm.Year, s, 10);
+  s += strlen(s);
+  *s++ = '-';
+  itoa2(tm.Month, s);
+  s += 2;
+  *s++ = '-';
+  itoa2(tm.Day, s);
+  s += 2;
+  *s++ = ' ';
+  itoa2(tm.Hour, s);
+  s += 2;
+  *s++ = ':';
+  itoa2(tm.Minute, s);
+  s += 2;
+  *s++ = ':';
+  itoa2(tm.Second, s);
+  return s_in;
+}
+
+char *format_time(time_t t, char *s) {
+  tmElements_t tm;
+  breakTime(t, tm);
+  return format_tm(tm, s);
 }
 
 void setup_RTC(void) {
@@ -124,11 +214,28 @@ void setup_RTC(void) {
   }
   if (serial_available) {
     Serial.println("RTC has set the system time");
-    Serial.println(now_local());
+    char s[22];
+    Serial.println(format_time(now_local(), s));
     Serial.println("RTC OK");
   }
   last_time = now_local();
 }
+
+time_t ds3231_now(void) {
+  // Unix time corresponding to current DS3231 state.
+  // Assume called soon after a tick interrupt, so can assume values are stable.
+  tmElements_t tm;
+  tm.Second = ds3231.getSecond();
+  tm.Minute = ds3231.getMinute();
+  bool h12, pmtime, century;
+  tm.Hour = ds3231.getHour(h12, pmtime);
+  tm.Day = ds3231.getDate();
+  tm.Month = ds3231.getMonth(century);
+  tm.Year = ds3231.getYear() + (2000 - 1970);  // tm.Year is years since 1970 in 8 bits.
+  return makeTime(tm);
+}
+
+#define INTERRUPT_DRIVEN
 
 bool update_RTC(void) {
   // Returns true each time an RTC interrupt is cleared, i.e. 1/sec.
@@ -206,18 +313,8 @@ void printDigits(int digits)
 void serial_print_tm(const tmElements_t &tm)
 {
   if (serial_available) {
-    Serial.print(1970 + tm.Year);
-    Serial.print("-");
-    printDigits(tm.Month);
-    Serial.print("-");
-    printDigits(tm.Day);
-    Serial.print(" ");
-    printDigits(tm.Hour);
-    Serial.print(":");
-    printDigits(tm.Minute);
-    Serial.print(":");
-    printDigits(tm.Second);
-    Serial.println();
+    char s[22];
+    Serial.println(format_tm(tm, s));
   }
 }
 
@@ -312,34 +409,61 @@ void setup_logger(void) {
 //------------------------
 
 // Layout
-const uint16_t overall_top_y = 0;
-const uint16_t date_midline_y = overall_top_y + 16;
-const uint16_t time_midline_y = overall_top_y + 52;
-const uint16_t seconds_midline_y = overall_top_y + 80;
-const uint16_t log_top_y = overall_top_y + 102;
-const uint16_t log_width = 192;
-const uint16_t log_height = 32;
-const uint16_t display_mid_x = 120;
-const uint8_t secs_x_scale = 3;
-const uint8_t secs_height = 8;
-
+#if SCREEN_WIDTH == 240
+const int16_t overall_top_y = 0;
+const int16_t date_midline_y = overall_top_y + 16;
+const int16_t time_midline_y = overall_top_y + 52;
+const int16_t seconds_midline_y = overall_top_y + 80;
+const int16_t log_top_y = overall_top_y + 102;
+const int16_t log_width = 192;
+const int16_t log_height = 32;
+const int16_t display_mid_x = 120;
+const int8_t secs_x_scale = 3;
+const int8_t secs_height = 8;
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
-
+#include <Fonts/CalBlk36.h>
 #define SMALLFONT &FreeSans12pt7b
+#define SMALL_VSHIFT  (0)
 #define MICROFONT
-#define CalBlk36 &FreeSansBold24pt7b
+#define MICROFONT_H  (8)
+#define MICROFONT_W  (6)
+//#define CalBlk36 &FreeSansBold24pt7b
+#define CalBlk36 &CalBlk3612pt7b
+#endif
+#if SCREEN_WIDTH == 128
+const int16_t overall_top_y = 0;
+const int16_t date_midline_y = overall_top_y + 3;
+const int16_t time_midline_y = overall_top_y + 25;
+const int16_t seconds_midline_y = overall_top_y + 36;
+const int16_t log_top_y = overall_top_y + 43;
+const int16_t log_width = 128;
+const int16_t log_height = 21;
+const int16_t display_mid_x = 64;
+const int8_t secs_x_scale = 2;
+const int8_t secs_height = 2;
+#include <Fonts/CalBlk36.h>
+#include <Fonts/TomThumb.h>
+#define SMALLFONT 
+#define SMALL_VSHIFT  (-6)
+#define MICROFONT &TomThumb
+#define MICROFONT_W (4)
+#define MICROFONT_H (6)
+#define CalBlk36 &CalBlk3612pt7b
+#endif
+
 
 uint16_t big_colon_width = 0;
 uint16_t big_colon_height = 0;
 uint16_t digits_width = 0;
 uint16_t digits_height = 0;
+uint16_t digits_baseline_shift = 0;
 uint16_t date_width = 0;
 const char *datefmt = "DDD YYYY-MM-DD";
 
 // 565 RGB 16-bit colors
-int fgcolor = 0; // ST77XX_WHITE;
-int bgcolor = 0x0847E6; // Bright blueish-green // ST77XX_BLACK;
+int fgcolor = FGCOLOR; // ST77XX_WHITE;
+int bgcolor = BGCOLOR; // Bright blueish-green // ST77XX_BLACK;
 
 enum text_alignment {
   TOP,
@@ -350,10 +474,10 @@ enum text_alignment {
 };
 
 void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y_align = MIDDLE,
-                int16_t clear_width=0, int16_t clear_height=0, bool debug=false) {
+                int16_t clear_width=0, int16_t clear_height=0, bool debug=false, int16_t font_hshift=0) {
   int16_t x1, y1;
   uint16_t w, h;
-  tft.getTextBounds(s, x, y, &x1, &y1, &w, &h);
+  display.getTextBounds(s, x, y, &x1, &y1, &w, &h);
   if (debug && serial_available) {
       Serial.print("print_text: x=");
       Serial.print(x);
@@ -382,13 +506,15 @@ void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y
     if (x_align == RIGHT) {
       // If clear_width != w, make the right edges line up (not the left).
       // Need to stretch right edge to cover 11->12 transition.
-      tft.fillRect(x - clear_width, y1 - h + 1, clear_width + 4, clear_height, bgcolor);
+      display.fillRect(x - clear_width, y1 - h + 1, clear_width + 4, clear_height, bgcolor);
+      //display.drawRect(x - clear_width, y1 - h + 1, clear_width + 4, clear_height, fgcolor);
     } else {
-      tft.fillRect(x - 1, y1 - h + 1, clear_width + 2, clear_height, bgcolor);
+      display.fillRect(x - 1, y1 - h + 1, clear_width + 2, clear_height, bgcolor);
+      //display.drawRect(x - 1, y1 - h + 1, clear_width + 2, clear_height, fgcolor);
     }
   }
-  tft.setCursor(x1, y1);
-  tft.print(s);
+  display.setCursor(x1, y1 + font_hshift);
+  display.print(s);
 }
 
 //int backlight_val = 32;
@@ -400,33 +526,47 @@ void setup_display(void) {
   //analogWrite(TFT_BACKLITE, backlight_val);
 
   // initialize TFT
-  tft.init(135, 240); // Init ST7789 240x135
-  tft.setRotation(3);
-  tft.fillScreen(bgcolor);
+#ifdef DISPLAY_ST7789
+  display.init(135, 240); // Init ST7789 240x135
+#endif
+#ifdef DISPLAY_SH1107
+  display.begin(display_address, true);
+  display.display();  // Splashscreen
+  delay(1000);
+  display.clearDisplay();
+  display.display();
+  Serial.println("SH1107 started");
+#endif
+  display.setRotation(1);
+  display.fillScreen(bgcolor);
 
-
-  tft.setFont(CalBlk36);
-  //tft.setTextSize(2);
+  display.setFont(CalBlk36);
+  //display.setTextSize(2);
   int16_t  x1, y1;
   uint16_t w, h;
-  tft.getTextBounds(":", (int16_t)0, (int16_t)0, &x1, &y1, &big_colon_width, &big_colon_height);
+  display.getTextBounds(":", (int16_t)0, (int16_t)0, &x1, &y1, &big_colon_width, &big_colon_height);
   big_colon_width += 1;
   big_colon_height += 1;
-  tft.getTextBounds("00", (int16_t)0, (int16_t)0, &x1, &y1, &digits_width, &digits_height);
+  display.getTextBounds("00", (int16_t)0, (int16_t)0, &x1, &y1, &digits_width, &digits_height);
   // Need to clear a little further.
   digits_width += 1;
   digits_height += 1;
-  
-  tft.setTextColor(fgcolor);
+#if SCREEN_WIDTH == 128
+  big_colon_height -= 11;
+  digits_height -= 11;
+  digits_baseline_shift = -10;
+#endif
 
-  tft.setFont(MICROFONT);
-  tft.setCursor(234, 0);
-  tft.print("S");
+  display.setTextColor(fgcolor);
+
+  display.setFont(MICROFONT);
+  display.setCursor(SCREEN_WIDTH - MICROFONT_W, MICROFONT_H);
+  display.print("S");
   if (serial_available) {
     Serial.println(F("Initialized"));
   } else {
-  tft.setCursor(234, 0);
-    tft.print("#");    
+    display.setCursor(SCREEN_WIDTH - MICROFONT_W, MICROFONT_H);
+    display.print("#");    
   }
 
   // Seconds progress bar frame.
@@ -434,7 +574,10 @@ void setup_display(void) {
   const uint8_t base_y = seconds_midline_y + secs_height / 2;
   const uint8_t base_x = display_mid_x - secs_x_scale * 30;
   // Box around the second progress bar, 1 pixel separated.
-  tft.drawRect(base_x - 2, base_y - 2, 60 * secs_x_scale + 4, secs_height + 4, fgcolor);
+  display.drawRect(base_x - 2, base_y - 2, 60 * secs_x_scale + 4, secs_height + 4, fgcolor);
+#ifdef DISPLAY_DISPLAY_CMD
+  display.display();
+#endif
 }
 
 char *sprint_int2(char *s, uint8_t n)
@@ -463,40 +606,38 @@ char *sprint_int(char *s, int n, int decimal_place=0)
   return s;
 }
 
-#define SMALL_TEXT_H  (8)
-#define SMALL_TEXT_W  (6)
-
 int y_offset_per_data(int data_y, int mid_y) {
     if (data_y >= mid_y) {
-    return -(SMALL_TEXT_H + 1);  // Line is in lower half; label above final point.
+    return -1;  // Line is in lower half; label above final point.
   } else {
-    return 1;   // Line is in upper half; label below final point.
+    return 1 + MICROFONT_H;   // Line is in upper half; label below final point.
   }
 }
 
 void draw_time(int x, int y, int day_mins, bool show_minutes=true) {
   // Plot a time as HH:MM (or just HH if not show_minutes) using tiny font.
+  // x, y is bottom-left
   char str[3];
   *(sprint_int2(str, day_mins / 60)) = '\0';
-  tft.setCursor(x, y);
-  tft.print(str);
+  display.setCursor(x, y);
+  display.print(str);
   if (show_minutes) {
     *(sprint_int2(str, day_mins % 60)) = '\0';
-    tft.setCursor(x + 2 * SMALL_TEXT_W + 2, y);
-    tft.print(str);   // Over by 2 chr + 2 px for colon.
+    display.setCursor(x + 2 * MICROFONT_W + 2, y);
+    display.print(str);   // Over by 2 chr + 2 px for colon.
     // Add colon.
-    tft.fillRect(x + 2 * SMALL_TEXT_W, y + 2, 1, 1, fgcolor);
-    tft.fillRect(x + 2 * SMALL_TEXT_W, y + 4, 1, 1, fgcolor);
+    display.fillRect(x + 2 * MICROFONT_W, y - 3, 1, 1, fgcolor);
+    display.fillRect(x + 2 * MICROFONT_W, y - 1, 1, 1, fgcolor);
   }
 }
 
 void draw_log_output(int x, int y, int w, int h) {
   // Clear canvas
-  tft.fillRect(x, y - 1, w, h + 2, bgcolor);
-  //tft.setTextSize(1);
+  display.fillRect(x, y - 1, w, h + 2, bgcolor);
+  //display.setTextSize(1);
   // Figure scaling
-  tft.setFont(MICROFONT);
-  const int legend_w = 3 * SMALL_TEXT_W; // for legends up to 3 digits.
+  display.setFont(MICROFONT);
+  const int legend_w = 3 * MICROFONT_W; // for legends up to 3 digits.
   uint8_t data_x = x + legend_w;
   uint8_t data_w = w - legend_w;
   int data_scale = (h - 1) * 256 / (data_max - data_min);
@@ -514,15 +655,15 @@ void draw_log_output(int x, int y, int w, int h) {
       int new_y = y + (h - 1) - ((data_scale * (last_data - data_min)) >> 8);
       int new_x = data_x + (i * (data_w - 1) / (LOG_DATA_LEN - 1));
       if (last_x_valid) {
-        tft.drawLine(last_x, last_y, new_x, new_y, fgcolor);
+        display.drawLine(last_x, last_y, new_x, new_y, fgcolor);
       }
       // Add vertical lines every 6h transition.
       int8_t quarter_day = log_times[i] / SUBDIV_MINS;
       if (quarter_day != last_quarter_day) {
         if (last_quarter_day >= 0) {
-          tft.drawLine(new_x, y, new_x, y + h, fgcolor);
+          display.drawLine(new_x, y, new_x, y + h, fgcolor);
           // Label it with 2 digits to the left.
-          int vert_line_legend_x = new_x - (2*SMALL_TEXT_W);
+          int vert_line_legend_x = new_x - (2 * MICROFONT_W);
           // Don't draw if it's going to splay off the left.
           if (vert_line_legend_x >= data_x) {
             draw_time(vert_line_legend_x, y - 1, quarter_day * SUBDIV_MINS, /* show_minutes= */ false);
@@ -549,24 +690,24 @@ void draw_log_output(int x, int y, int w, int h) {
     // Bias time to be below if it's at the mid point so that it might miss the current value.
     int y_offset = y_offset_per_data(first_y - 1, mid_y);
     // Only draw first_time if it doesn't impinge on legend at left.
-    int first_time_x = first_x - (4*SMALL_TEXT_W + 1);
+    int first_time_x = first_x - (4 * MICROFONT_W + 1);
     if (first_time_x >= data_x) {
       draw_time(first_time_x, first_y + y_offset, first_time);
     }
     // Label current value.
     y_offset = y_offset_per_data(last_y, mid_y);
     *(sprint_int(legend_str, last_data)) = '\0';
-    tft.setCursor(last_x - SMALL_TEXT_W * strlen(legend_str) + 2, last_y + y_offset);
-    tft.print(legend_str);
+    display.setCursor(last_x - MICROFONT_W * strlen(legend_str) + 2, last_y + y_offset);
+    display.print(legend_str);
   }
   // Add legend at left.
   *(sprint_int(legend_str, data_max)) = '\0';
-  tft.setCursor(x, y);
-  tft.print(legend_str);
+  display.setCursor(x, y + MICROFONT_H);
+  display.print(legend_str);
   *(sprint_int(legend_str, data_min)) = '\0';
-  tft.setCursor(x, y + h - SMALL_TEXT_H);
-  tft.print(legend_str);  // Font is 6 pixels high.
-  //tft.setTextSize(2);
+  display.setCursor(x, y + h);
+  display.print(legend_str);  // Font is 6 pixels high.
+  //display.setTextSize(2);
 }
 
 int8_t last_day = 0, last_hour = -1, last_minute = -1;
@@ -595,7 +736,7 @@ void sprint_date(class DateTime& dt, char* datestr) {
 int update_display(time_t t) {
   // Returns minutes within day (0..1440).
   //u8g2.clearBuffer();   // for _F_ initializer only
-  //tft.fillScreen(bgcolor);
+  //display.fillScreen(bgcolor);
   int mid_x = display_mid_x;
 
   tmElements_t tm;
@@ -609,12 +750,13 @@ int update_display(time_t t) {
     DateTime dt(t);
     sprint_date(dt, datestr);
     // Date.
-    tft.setFont(SMALLFONT);
+    display.setFont(SMALLFONT);
     int16_t  x1, y1;
     uint16_t w, h;
-    tft.getTextBounds(datestr, (int16_t)0, (int16_t)0, &x1, &y1, &w, &h);
-    //tft.drawRect(mid_x - w/2 - 8, date_midline_y - h/2 - 1, w + 16, h + 2, fgcolor);      
-    print_text(datestr, mid_x - w/2, date_midline_y - h/2, LEFT, TOP, w + 16, h, false);
+    display.getTextBounds(datestr, (int16_t)0, (int16_t)0, &x1, &y1, &w, &h);
+    //display.drawRect(mid_x - w/2 - 8, date_midline_y - h/2 - 1, w + 16, h + 2, fgcolor);      
+    print_text(datestr, mid_x - w/2, date_midline_y - h / 2 - 1, LEFT, TOP, w + 16, h, true, SMALL_VSHIFT);
+    //print_text(datestr, 0, 0, LEFT, TOP, w + 16, h, true, SMALL_VSHIFT);
   }
 
   colon_visible = !colon_visible;
@@ -636,10 +778,10 @@ int update_display(time_t t) {
   uint8_t bar_width = secs_x_scale * (1 + prev_second);
   if (prev_minute & 1) {
     // bar shrinking to right
-    tft.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
+    display.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
   } else {
     // bar growing from left
-    tft.fillRect(base_x, base_y, bar_width, secs_height, fgcolor);
+    display.fillRect(base_x, base_y, bar_width, secs_height, fgcolor);
   }
 
   // Logging plot setup
@@ -649,29 +791,34 @@ int update_display(time_t t) {
   const int log_h = log_height;
 
   // Large digits time.
-  tft.setFont(CalBlk36);
+  display.setFont(CalBlk36);
   char digit_string[3];
   //mid_x -= big_colon_width;
   if (tm.Hour != last_hour) {
     last_hour = tm.Hour;
     sprint_int2(digit_string, tm.Hour);
     digit_string[2] = '\0';
-    print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, RIGHT, MIDDLE, digits_width, digits_height);
+    print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, 
+               RIGHT, MIDDLE, digits_width, digits_height, false,  digits_baseline_shift);
   }
   if (tm.Minute != last_minute) {
     last_minute = tm.Minute;
     sprint_int2(digit_string, tm.Minute);
     digit_string[2] = '\0';
-    print_text(digit_string, mid_x + (big_colon_width/2) + 2, time_midline_y, LEFT, MIDDLE, digits_width, digits_height);
+    print_text(digit_string, mid_x + (big_colon_width/2) + 2, time_midline_y,
+               LEFT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
     // Update log when minutes change.
     draw_log_output(log_x, log_y, log_w, log_h);
   }
   if (colon_visible) {
-    print_text(":", mid_x, time_midline_y);
+    print_text(":", mid_x, time_midline_y + digits_baseline_shift);
   } else {
-    tft.fillRect(mid_x - 1, time_midline_y - (big_colon_height >> 1),
+    display.fillRect(mid_x - 1 - 4, time_midline_y - (big_colon_height >> 1) - 4,
                  big_colon_width, big_colon_height, bgcolor);
   }
+#ifdef DISPLAY_DISPLAY_CMD
+  display.display();
+#endif
 
   return mins_within_day;
 }
@@ -747,8 +894,10 @@ void cmd_update(void) {
         switch (cmd0) {
           case 'A':
             // Set aging offset.
-            value = atoi(cmd_buffer + 1);
-            ds3231.setAgingOffset(value);
+            if (strlen(cmd_buffer + 1)) {
+              value = atoi(cmd_buffer + 1);
+              ds3231.setAgingOffset(value);
+            }
             Serial.print("Aging offset=");
             Serial.println((int8_t)ds3231.getAgingOffset());
             break;
@@ -792,7 +941,9 @@ void cmd_update(void) {
             // Set backlight color to RRGGBB in hex.
             uint32_t brightness = htoi(cmd_buffer + 1);
             //set_backlight_color(brightness);
+#ifdef BACKLIGHT
             analogWrite(backlightPin, brightness);
+#endif
             Serial.print("new color=");
             Serial.println(brightness);
             break;
@@ -864,23 +1015,34 @@ void update_backlight(int hour) {
 
 #define SECS_PER_DAY (24 * 60 * 60)
 
-void setup()
-{
-#ifdef USE_SERIAL
-  Serial.begin(9600);
+//bool serial_available = false;
+
+#define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
+
+void open_serial(int baudrate=9600) {
+  Serial.begin(baudrate);
   // Wait for Serial port to open
   int i = 0;
-#define MAXWAIT 1000
   while (!Serial) {
     delay(10);
     ++i;
-    if (i > MAXWAIT) break;
+    if (i > MAXWAIT_SERIAL) break;
   }
-  if (i <= MAXWAIT /* Serial */) {
+  if (i <= MAXWAIT_SERIAL) {
     serial_available = true;
   }
-  //delay(500);
-#endif
+  delay(1000);
+}
+
+const int ledPin = 13; // On-board LED
+uint8_t ledState = false;
+
+void setup()
+{
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, HIGH);
+
+  open_serial();
 
   if (serial_available) {
     Serial.print(F("gfx_clock_logger "));
@@ -889,21 +1051,48 @@ void setup()
     Serial.println(__TIME__);
   }
 
+#  //pinMode(ledPin, OUTPUT);
+  //digitalWrite(ledPin, HIGH);
+#ifdef ARDUINO_ARCH_RP2040
+  // Configure Pico RP2040 I2C
+  // Internal I2C is used to communicate with I2C peripherals.
+  //Serial.println("Setting INT_I2C pins...");
+  // Feather RP2040 hangs if you try to set int_sda pins (2/3).
+  //INT_I2C.setSDA(int_sda_pin);
+  //INT_I2C.setSCL(int_scl_pin);
+  // Wire is initialized insid OLED display.
+  //Serial.println("INT_I2C pins set.");
+  Serial.println("Configuring EXT_I2C...");
+  EXT_I2C.setSDA(ext_sda_pin);
+  EXT_I2C.setSCL(ext_scl_pin);
+  Serial.println("EXT_I2C pins set.");
+  EXT_I2C.begin();
+#else
+  //EXT_I2C.begin(ext_sda_pin, ext_scl_pin);
+  //INT_I2C.begin();
+#endif
+  Serial.println("I2C configured.");
+
+#ifdef DISPLAY_ST7789
   // turn on the TFT / I2C power supply
   pinMode(TFT_I2C_POWER, OUTPUT);
   digitalWrite(TFT_I2C_POWER, HIGH);
   delay(10);
-
-  Wire.begin();
+#endif
 
   setup_RTC();
+  Serial.println("RTC set up.");
   setup_interrupts();
+  Serial.println("Interrupts set up.");
   setup_display();
   setup_backlight();
+  Serial.println("done backlight");
   setup_temp_F();
+  Serial.println("done temp");
   setup_logger();
+  Serial.println("done logger");
   cmd_setup();
-
+  Serial.println("done cmd");
 }
 
 //time_t current_now = 60 * (9 * 60 + 50);
@@ -919,6 +1108,8 @@ void loop()
   update_logger(read_temp_F(), mins_within_day);
 #else
   if (update_RTC()) {
+    ledState = !ledState;
+    digitalWrite(ledPin, ledState);
     current_now = now_local();
     int mins_within_day = update_display(current_now);
     update_logger(read_temp_F(), mins_within_day);
