@@ -8,6 +8,7 @@
  * 
  */
 
+
 #include <Wire.h>           // https://www.arduino.cc/en/Reference/Wire
 
 // Enable serial monitor?
@@ -21,11 +22,11 @@ bool serial_available = false;
 //#define TEMP_SHT4x
 #define TEMP_DS3231
 
-const int MINS_PER_DAY = 1440;
+const int SECS_PER_DAY = 24 * 60 * 60;
 const int LOG_DATA_LEN = 120;     // One value per pixel, roughly.
 const int LOG_INTERVAL_SECS = 12 * 60;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
-const int LOG_MAX_TIME_PERIOD = MINS_PER_DAY * 60;  // Make sure we roll-over correctly.
-const int SUBDIV_MINS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines occur
+const int LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
+const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines occur
 
 //#include <Arduino.h>
 
@@ -45,7 +46,8 @@ const int SUBDIV_MINS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines o
   #ifdef MY_PICO_RP2040_LCD
     #define DISPLAY_ST7920  // 128x64 green-yellow LCD matrix
   #else  // FEATHER_RP2040
-    #define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+    //#define DISPLAY_SH1107    // 128x(64,128) mono OLED in Feather stack
+    #define DISPLAY_ST7920  // 192x64 green-yellow LCD matrix
   #endif
   //const int int_sda_pin = 2;
   //const int int_scl_pin = 3;
@@ -70,6 +72,8 @@ const int SUBDIV_MINS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines o
 #ifdef DISPLAY_ST7789
   #warning DISPLAY_ST7789
   #include <Adafruit_ST7789.h>
+  #define SCREEN_HEIGHT 135
+  #define SCREEN_WIDTH 240
   Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
   // Ue the backlight.
   #define BACKLIGHT
@@ -95,6 +99,32 @@ const int SUBDIV_MINS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines o
   #define BGCOLOR SH110X_BLACK
   #define FGCOLOR SH110X_WHITE
   #define SLEEP_TIMEOUT_SECS 300
+#endif
+#ifdef DISPLAY_ST7920
+  #warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
+  #include "ST7920_GFX_Library.h"
+  // Needs display.display() after drawing
+  #define DISPLAY_DISPLAY_CMD
+  // Backlight pin
+  #define BACKLIGHT
+  const int backlightPin = 20;  // 3 when lower left is 0
+  const int RST_PIN = 1;
+  const int CS_PIN = 0;
+  const int MOSI_PIN = 19;
+  const int CLK1_PIN = 18;
+  const int CLK2_PIN = 6;
+//  ST7920 LCD RST       [ora]   GP01              2  from lower left
+//  ST7920 LCD CS (RS)   [ylw]   GP00              1
+//  ST7920 LCD SCLK1(E1) [blu]   GP18              5  // Hardware constraint for SPI0CK
+//  ST7920 LCD SCLK2(E2) [pur]   GP06   lower left 0  // Hardware constraint for SPI0CK
+//  ST7920 LCD MOSI (RW) [grn]   GP19              4  // Hardware constraint for SPI0MOSI
+  #define SCREEN_HEIGHT 64
+  #define SCREEN_WIDTH 128
+  //ST7920 display(CS_PIN);
+  ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
+  #define SLEEP_TIMEOUT_SECS 0  // no timeout for LCD.
+  #define BGCOLOR 0
+  #define FGCOLOR 1
 #endif
 
 // Predeclare display timeout val.
@@ -327,7 +357,7 @@ void serial_print_tm(const tmElements_t &tm)
 // Logger
 // -------------------
 
-uint8_t log_data[LOG_DATA_LEN];
+int log_data[LOG_DATA_LEN];
 time_t log_times[LOG_DATA_LEN];
 int data_min = 70;
 int data_max = 75;
@@ -342,7 +372,7 @@ void init_data(int init_val, time_t init_time) {
   set_min_max(log_data, log_times, LOG_DATA_LEN, &data_min, &data_max);
 }
 
-void set_min_max(uint8_t *log_data, time_t *data_valid, int log_data_len, int *pdata_min, int *pdata_max) {
+void set_min_max(int *log_data, time_t *data_valid, int log_data_len, int *pdata_min, int *pdata_max) {
   int data_min = 0;
   int data_max = 0;
   bool seen_valid_data = false;
@@ -366,14 +396,14 @@ void set_min_max(uint8_t *log_data, time_t *data_valid, int log_data_len, int *p
   }
 }
 
-void update_most_recent_data(uint8_t new_data) {
+void update_most_recent_data(int new_data) {
   // Simply change the final data point (provided it's already been set).
   if (log_times[LOG_DATA_LEN - 1] != INVALID_TIME) {
     log_data[LOG_DATA_LEN - 1] = new_data;
   }
 }
 
-void push_data(uint8_t new_data, time_t new_time) {
+void push_data(int new_data, time_t new_time) {
   // Move forward data
   if (serial_available) {
      Serial.print("new_data: ");
@@ -392,7 +422,7 @@ void push_data(uint8_t new_data, time_t new_time) {
 time_t last_log_time = 0;
 
 void update_logger(int data_val, time_t data_time) {
-  if ( (data_time - last_log_time + LOG_MAX_TIME_PERIOD) % LOG_MAX_TIME_PERIOD >= LOG_INTERVAL_SECS) {
+  if ( (data_time - last_log_time + LOG_MAX_TIME_PERIOD_SECS) % LOG_MAX_TIME_PERIOD_SECS >= LOG_INTERVAL_SECS) {
     // Time to log a new value.
     last_log_time = data_time;
     // Record new temperature every minute.
@@ -414,7 +444,7 @@ void setup_logger(void) {
 //------------------------
 
 // Layout
-#if SCREEN_WIDTH == 240
+#if SCREEN_HEIGHT == 135
 const int16_t overall_top_y = 0;
 const int16_t date_midline_y = overall_top_y + 16;
 const int16_t time_midline_y = overall_top_y + 52;
@@ -436,7 +466,7 @@ const int8_t secs_height = 8;
 //#define CalBlk36 &FreeSansBold24pt7b
 #define CalBlk36 &CalBlk3612pt7b
 #endif
-#if SCREEN_WIDTH == 128
+#if SCREEN_HEIGHT == 64
 const int16_t overall_top_y = 0;
 const int16_t date_midline_y = overall_top_y + 3;
 const int16_t time_midline_y = overall_top_y + 25;
@@ -532,7 +562,7 @@ void setup_display(void) {
 
   // initialize TFT
 #ifdef DISPLAY_ST7789
-  display.init(135, 240); // Init ST7789 240x135
+  display.init(SCREEN_HEIGHT, SCREEN_WIDTH); // Init ST7789 240x135
 #endif
 #ifdef DISPLAY_SH1107
   display.begin(display_address, true);
@@ -542,7 +572,19 @@ void setup_display(void) {
   display.display();
   Serial.println("SH1107 started");
 #endif
-  display.setRotation(1);
+#ifdef DISPLAY_ST7920
+  //gpio_set_function(CLK2_PIN, GPIO_FUNC_SPI);
+  //gpio_set_function(CLK1_PIN, GPIO_FUNC_XIP);
+  //SPI.setSCK(CLK2_PIN);
+  display.begin();
+  display.setTextSize(1);
+  display.setTextColor(BLACK);
+  display.setCursor(0,0);
+  display.println("Hello, world! 12345678901234567890");
+  display.display();
+  delay(2000);
+#endif
+  display.setRotation(1);  // Landscape.
   display.fillScreen(bgcolor);
 
   display.setFont(CalBlk36);
@@ -556,7 +598,7 @@ void setup_display(void) {
   // Need to clear a little further.
   digits_width += 1;
   digits_height += 1;
-#if SCREEN_WIDTH == 128
+#if SCREEN_HEIGHT == 64
   big_colon_height -= 11;
   digits_height -= 11;
   digits_baseline_shift = -10;
@@ -649,11 +691,11 @@ void draw_log_output(int x, int y, int w, int h) {
   uint8_t last_x;
   bool last_x_valid = false;
   uint8_t last_y = y;
-  uint8_t last_data = 0;
+  int last_data = 0;
   uint8_t first_x = 0;
   uint8_t first_y = 0;
   time_t first_time_mins = INVALID_TIME;
-  int8_t last_quarter_day = -1;
+  int last_subdiv = -1;
   for (int i = 0; i < LOG_DATA_LEN; ++i) {
     last_data = log_data[i];
     if (log_times[i] != INVALID_TIME) {
@@ -663,24 +705,24 @@ void draw_log_output(int x, int y, int w, int h) {
         display.drawLine(last_x, last_y, new_x, new_y, fgcolor);
       }
       // Add vertical lines every 6h transition.
-      int8_t quarter_day = ((log_times[i] / 60) / SUBDIV_MINS) % 128;
-      if (quarter_day != last_quarter_day) {
-        if (last_quarter_day >= 0) {
+      int subdiv = log_times[i]  / SUBDIV_SECS;
+      if (subdiv != last_subdiv) {
+        if (last_subdiv >= 0) {
           display.drawLine(new_x, y, new_x, y + h, fgcolor);
           // Label it with 2 digits to the left.
           int vert_line_legend_x = new_x - (2 * MICROFONT_W);
           // Don't draw if it's going to splay off the left.
           if (vert_line_legend_x >= data_x) {
-            draw_time(vert_line_legend_x, y - 1 + MICROFONT_H, quarter_day * SUBDIV_MINS, /* show_minutes= */ false);
+            draw_time(vert_line_legend_x, y - 1 + MICROFONT_H, ((subdiv * SUBDIV_SECS) % SECS_PER_DAY) / 60, /* show_minutes= */ false);
           }
         }
-        last_quarter_day = quarter_day;
+        last_subdiv = subdiv;
       }
       last_x = new_x;
       last_y = new_y;
       last_x_valid = true;
       if (first_time_mins == INVALID_TIME) {
-        first_time_mins = (log_times[i] / 60) % MINS_PER_DAY;
+        first_time_mins = (log_times[i] % SECS_PER_DAY) / 60;
         first_x = last_x;
         first_y = last_y;  // Needed to position earliest timestamp below.
       }
@@ -817,7 +859,7 @@ int update_display(time_t t, uint8_t redraw=false) {
     draw_log_output(log_x, log_y, log_w, log_h);
   }
   if (colon_visible) {
-    print_text(":", mid_x, time_midline_y + digits_baseline_shift);
+    print_text((char *)":", mid_x, time_midline_y + digits_baseline_shift);
   } else {
     display.fillRect(mid_x - 1 - 4, time_midline_y - (big_colon_height >> 1) - 4,
                  big_colon_width, big_colon_height, bgcolor);
@@ -1110,7 +1152,8 @@ void cmd_update(void) {
             break;
           case 'B':
             // Set backlight color to RRGGBB in hex.
-            backlight_brightness = htoi(cmd_buffer + 1);
+            if (cmd_buffer[1])
+              backlight_brightness = htoi(cmd_buffer + 1);
             //set_backlight_color(backlight_brightness);
 #ifdef BACKLIGHT
             analogWrite(backlightPin, backlight_brightness);
@@ -1191,8 +1234,6 @@ void update_backlight(int hour) {
 // ---------------------------------
 // Main
 // ---------------------------------
-
-#define SECS_PER_DAY (24 * 60 * 60)
 
 //bool serial_available = false;
 
@@ -1299,6 +1340,7 @@ void loop()
 #endif
   cmd_update();
   buttons_update();
+  sleep_update();
   update_backlight(hour(current_now));
   delay(50);
 }
