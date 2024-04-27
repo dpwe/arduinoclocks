@@ -579,12 +579,13 @@ void setup_display(void) {
   display.begin();
   display.setTextSize(1);
   display.setTextColor(BLACK);
-  display.setCursor(0,0);
-  display.println("Hello, world! 12345678901234567890");
-  display.display();
-  delay(2000);
+  //display.setCursor(0,0);
+  //display.println("Hello, world!"); // 12345678901234567890");
+  //display.display();
+  //delay(2000);
 #endif
-  display.setRotation(1);  // Landscape.
+  display.setRotation(0);  // Portrait.
+  //display.setRotation(1);  // Landscape.
   display.fillScreen(bgcolor);
 
   display.setFont(CalBlk36);
@@ -616,12 +617,6 @@ void setup_display(void) {
     display.print("#");    
   }
 
-  // Seconds progress bar frame.
-  // Seconds bar dimensions
-  const uint8_t base_y = seconds_midline_y + secs_height / 2;
-  const uint8_t base_x = display_mid_x - secs_x_scale * 30;
-  // Box around the second progress bar, 1 pixel separated.
-  display.drawRect(base_x - 2, base_y - 2, 60 * secs_x_scale + 4, secs_height + 4, fgcolor);
 #ifdef DISPLAY_DISPLAY_CMD
   display.display();
 #endif
@@ -788,7 +783,7 @@ int update_display(time_t t, uint8_t redraw=false) {
 
   tmElements_t tm;
   breakTime(t, tm);
-  serial_print_tm(tm);
+  //serial_print_tm(tm);
   int mins_within_day = 60 * tm.Hour + tm.Minute;
   if (redraw || tm.Day != last_day) {
     last_day = tm.Day;
@@ -812,9 +807,14 @@ int update_display(time_t t, uint8_t redraw=false) {
   // Big digits layout
   const int time_y = time_midline_y;
 
+  // Seconds progress bar frame.
   // Seconds bar dimensions
   const uint8_t base_y = seconds_midline_y + secs_height / 2;
   const uint8_t base_x = mid_x - secs_x_scale * 30;
+  if (redraw) {
+    // Box around the second progress bar, 1 pixel separated.
+    display.drawRect(base_x - 2, base_y - 2, 60 * secs_x_scale + 4, secs_height + 4, fgcolor);
+  }
   // Bar width goes from 1 to 60 (instead of 0 to 59), so we have to work with one second ago.
   int prev_minute = tm.Minute;
   int prev_second = tm.Second - 1;
@@ -824,11 +824,13 @@ int update_display(time_t t, uint8_t redraw=false) {
   }
   // Bar width goes from 1 to 60 (instead of 0 to 59)
   uint8_t bar_width = secs_x_scale * (1 + prev_second);
-  if (redraw || (prev_minute & 1) == 0) {
+  if ((prev_minute & 1) == 0) {
     // bar growing from left
     display.fillRect(base_x, base_y, bar_width, secs_height, fgcolor);
   } else {
     // bar shrinking to right
+    if (redraw)
+      display.fillRect(base_x, base_y, secs_x_scale * 60, secs_height, fgcolor);
     display.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
   }
 
@@ -838,18 +840,28 @@ int update_display(time_t t, uint8_t redraw=false) {
   const int log_w = log_width;
   const int log_h = log_height;
 
-  // Large digits time.
-  display.setFont(CalBlk36);
-  char digit_string[3];
-  //mid_x -= big_colon_width;
-  if (redraw || tm.Hour != last_hour) {
-    last_hour = tm.Hour;
-    sprint_int2(digit_string, tm.Hour);
-    digit_string[2] = '\0';
-    print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, 
-               RIGHT, MIDDLE, digits_width, digits_height, false,  digits_baseline_shift);
+  {
+    // Large digits time.
+    display.setFont(CalBlk36);
+    char digit_string[3];
+    //mid_x -= big_colon_width;
+    if (redraw || tm.Hour != last_hour) {
+      last_hour = tm.Hour;
+      sprint_int2(digit_string, tm.Hour);
+      digit_string[2] = '\0';
+      print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, 
+                RIGHT, MIDDLE, digits_width, digits_height, false,  digits_baseline_shift);
+    }
+    if (colon_visible) {
+      // We're still in CalBlk36 mode.
+      print_text((char *)":", mid_x, time_midline_y + digits_baseline_shift);
+    } else {
+      display.fillRect(mid_x - 1 - 4, time_midline_y - (big_colon_height >> 1) - 4,
+                  big_colon_width, big_colon_height, bgcolor);
+    }
   }
   if (redraw || tm.Minute != last_minute) {
+    char digit_string[3];
     last_minute = tm.Minute;
     sprint_int2(digit_string, tm.Minute);
     digit_string[2] = '\0';
@@ -857,12 +869,6 @@ int update_display(time_t t, uint8_t redraw=false) {
                LEFT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
     // Update log when minutes change.
     draw_log_output(log_x, log_y, log_w, log_h);
-  }
-  if (colon_visible) {
-    print_text((char *)":", mid_x, time_midline_y + digits_baseline_shift);
-  } else {
-    display.fillRect(mid_x - 1 - 4, time_midline_y - (big_colon_height >> 1) - 4,
-                 big_colon_width, big_colon_height, bgcolor);
   }
 #ifdef DISPLAY_DISPLAY_CMD
   display.display();
@@ -873,20 +879,29 @@ int update_display(time_t t, uint8_t redraw=false) {
 
 // ------------- Display sleep (screensaver) -----------
 
+int current_brightness = 0;
+
+void set_brightness(int brightness) {
+  current_brightness = brightness;
+#ifdef BACKLIGHT
+  analogWrite(backlightPin, current_brightness);
+#endif
+  //Serial.print("set_brightness ");
+  //Serial.println(current_brightness);
+}
+
 // Moved up for CLI access
 bool display_on = true;
-
-int backlight_brightness = 0;
+int light_low = 64;
+int light_high = 255;
+int *plight_current = &light_high;
 
 void wake_up_display(void) {
   Serial.println("wake_display");
-#ifdef DISPLAY_BACKLIGHT
-  // turn on backlite
-  analogWrite(backlightPin, backlight_brightness);
-#endif
   display_on = true;
-  setup_display();
   update_display(now_local(), /* redraw= */ true);
+  // turn on backlite
+  set_brightness(*plight_current);
 }
 
 void sleep_display(void) {
@@ -897,9 +912,9 @@ void sleep_display(void) {
 #else
   display.fillScreen(BLACK);
 #endif
-#ifdef DISPLAY_BACKLIGHT
+#ifdef BACKLIGHT
   // turn off backlite
-  analogWrite(backlightPin, 0);
+  set_brightness(0);
 #endif
   display_on = false;
 }
@@ -1151,15 +1166,15 @@ void cmd_update(void) {
             //add_steps(atoi(cmd_buffer + 1));
             break;
           case 'B':
-            // Set backlight color to RRGGBB in hex.
+            // Set backlight brightness.
             if (cmd_buffer[1])
-              backlight_brightness = htoi(cmd_buffer + 1);
-            //set_backlight_color(backlight_brightness);
+              *plight_current = atoi(cmd_buffer + 1);
+            //set_backlight_color(*plight_current);
 #ifdef BACKLIGHT
-            analogWrite(backlightPin, backlight_brightness);
+            //analogWrite(backlightPin, *plight_current);
 #endif
             Serial.print("new color=");
-            Serial.println(backlight_brightness);
+            Serial.println(*plight_current);
             break;
           case 'X':
             // Set/read display sleep timeout in secs.
@@ -1185,18 +1200,17 @@ void cmd_update(void) {
 // ---------------------------------
 
 // Config for backlight day/night mode.
-const int light_low = 8;
-const int light_high = 64;
+//int light_low = 8;
+//int light_high = 64;
+//int *plight_current;
 const int hour_up = 7;
 const int hour_down = 22;
-
-//int backlight_brightness = 0;
 
 void setup_backlight(void) {
   // Backlight
 #ifdef BACKLIGHT
   pinMode(backlightPin, OUTPUT);  // sets the pin as output
-  analogWrite(backlightPin, backlight_brightness);
+  set_brightness(*plight_current);
 #endif
 }
 
@@ -1210,23 +1224,22 @@ static inline int8_t sgn(int val) {
 }
 
 void update_backlight(int hour) {
-  int target_brightness = light_low;
   if (hour >= hour_up && hour < hour_down) {
-    target_brightness = light_high;
+    plight_current = &light_high;
+  } else {
+    plight_current = &light_low;
   }
-  if (++bright_tick >= ticks_per_step) {
-    // Slow down the brightness change steps.
-    bright_tick = 0;
-    int bright_delta = target_brightness - backlight_brightness;
-    if (bright_delta) {
-      backlight_brightness += (bright_delta >> 6) + sgn(bright_delta);
-#ifdef BACKLIGHT
-      analogWrite(backlightPin, backlight_brightness);
-      if (serial_available) {
-        //Serial.print("brightness=");
-        //Serial.println(backlight_brightness);
+  if (display_on) {
+    int target_brightness = *plight_current;
+    int new_brightness = current_brightness;
+    if (++bright_tick >= ticks_per_step) {
+      // Slow down the brightness change steps.
+      bright_tick = 0;
+      int bright_delta = target_brightness - current_brightness;
+      if (bright_delta) {
+        new_brightness += (bright_delta >> 6) + sgn(bright_delta);
+        set_brightness(new_brightness);
       }
-#endif // BACKLIGHT
     }
   }
 }
@@ -1251,7 +1264,7 @@ void open_serial(int baudrate=9600) {
   if (i <= MAXWAIT_SERIAL) {
     serial_available = true;
   }
-  delay(1000);
+  delay(100);
 }
 
 const int ledPin = 13; // On-board LED
@@ -1305,6 +1318,7 @@ void setup()
   setup_interrupts();
   Serial.println("Interrupts set up.");
   setup_display();
+  update_display(now_local(), /*redraw=*/true);
   setup_backlight();
   Serial.println("done backlight");
   setup_temp_F();
