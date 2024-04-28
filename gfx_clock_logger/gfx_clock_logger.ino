@@ -81,6 +81,7 @@ const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines o
   #define BGCOLOR 0x0847E6  // yellow-green
   #define FGCOLOR 0
   #define SLEEP_TIMEOUT_SECS 0  // no timeout for LCD.
+  #define ROTATION 1
 #endif
 #ifdef DISPLAY_SH1107
   #warning DISPLAY_SH1107
@@ -99,6 +100,7 @@ const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines o
   #define BGCOLOR SH110X_BLACK
   #define FGCOLOR SH110X_WHITE
   #define SLEEP_TIMEOUT_SECS 300
+  #define ROTATION 1
 #endif
 #ifdef DISPLAY_ST7920
   #warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
@@ -119,12 +121,14 @@ const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines o
 //  ST7920 LCD SCLK2(E2) [pur]   GP06   lower left 0  // Hardware constraint for SPI0CK
 //  ST7920 LCD MOSI (RW) [grn]   GP19              4  // Hardware constraint for SPI0MOSI
   #define SCREEN_HEIGHT 64
-  #define SCREEN_WIDTH 128
+  //#define SCREEN_WIDTH 128
   //ST7920 display(CS_PIN);
+  #define SCREEN_WIDTH 192
   ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
   #define SLEEP_TIMEOUT_SECS 0  // no timeout for LCD.
   #define BGCOLOR 0
   #define FGCOLOR 1
+  #define ROTATION 0
 #endif
 
 // Predeclare display timeout val.
@@ -584,8 +588,7 @@ void setup_display(void) {
   //display.display();
   //delay(2000);
 #endif
-  display.setRotation(0);  // Portrait.
-  //display.setRotation(1);  // Landscape.
+  display.setRotation(ROTATION);
   display.fillScreen(bgcolor);
 
   display.setFont(CalBlk36);

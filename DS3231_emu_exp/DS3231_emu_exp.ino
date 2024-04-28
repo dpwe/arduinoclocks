@@ -104,45 +104,30 @@
 #include <RTClib.h>  // Adafruit; defines RTC_DS3231
 
 #ifdef ARDUINO_ARCH_RP2040
-#ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
-#define FEATHER_RP2040
-#define FEATHER_OLED
-#else
-#define MY_PICO_RP2040
-#define MY_PICO_RP2040_LCD  // Alternate RP2040 pinout for 3" LCD on SPI
-#endif
-// Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
-// must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
-#ifdef MY_PICO_RP2040
-  #ifdef MY_PICO_RP2040_LCD
-    const int ext_sda_pin = 4;
-    const int ext_scl_pin = 5;
+  #ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
+    #define FEATHER_RP2040
+    //#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+    //#define FEATHER_OLED    // Different address than ext OLED.
+    #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
   #else
-    const int ext_sda_pin = 16;
-    const int ext_scl_pin = 17;
+    #define MY_PICO_RP2040
+    #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
   #endif
-#define DISPLAY_ST7920  // 128x64 green-yellow LCD matrix
-#else  // FEATHER_RP2040
-  const int ext_sda_pin = 24;  // A4;
-  const int ext_scl_pin = 25;  // A5;
-#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
-#endif  
-#define EXT_I2C Wire
-const int int_sda_pin = 2;
-const int int_scl_pin = 3;
-#define INT_I2C Wire1
-
-
-#else
-// ESP32-S3
-const int ext_sda_pin = A4;
-const int ext_scl_pin = A5;
-#define EXT_I2C Wire1
-#define INT_I2C Wire
-
-#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
-//#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
-
+  // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
+  // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
+  const int ext_sda_pin = 24;
+  const int ext_scl_pin = 25;
+  #define EXT_I2C Wire1
+  const int int_sda_pin = 2;
+  const int int_scl_pin = 3;
+  #define INT_I2C Wire
+#else // ESP32-S3
+  const int ext_sda_pin = A4;
+  const int ext_scl_pin = A5;
+  #define EXT_I2C Wire1
+  #define INT_I2C Wire
+  #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
 #endif
 
 
@@ -151,133 +136,141 @@ const int ext_scl_pin = A5;
 #include <Adafruit_GFX.h>
 
 #ifdef DISPLAY_SSD1351
-#warning "DISPLAY_SSD1351 128x128 OLED"
-#include <Adafruit_SSD1351.h>
-// Screen dimensions
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
-#define SIZE_1X
-
-// Hardware SPI pins
-// (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
-// an output.
-#define DC_PIN 4
-#define CS_PIN 5
-#define RST_PIN 6
-Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
-
-// Color definitions
-#define BLACK 0x0000
-#define BLUE 0x001F
-#define RED 0xF800
-#define GREEN 0x07E0
-#define CYAN 0x07FF
-#define MAGENTA 0xF81F
-#define YELLOW 0xFFE0
-#define WHITE 0xFFFF
+  #warning "DISPLAY_SSD1351 128x128 OLED"
+  #include <Adafruit_SSD1351.h>
+  // Screen dimensions
+  #define SCREEN_WIDTH 128
+  #define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
+  #define SIZE_1X
+  // Hardware SPI pins
+  // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
+  // an output.
+  #define DC_PIN 4
+  #define CS_PIN 5
+  #define RST_PIN 6
+  Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
+  // Color definitions
+  #define BLACK 0x0000
+  #define BLUE 0x001F
+  #define RED 0xF800
+  #define GREEN 0x07E0
+  #define CYAN 0x07FF
+  #define MAGENTA 0xF81F
+  #define YELLOW 0xFFE0
+  #define WHITE 0xFFFF
 #endif
 
 #ifdef DISPLAY_ST7789
-#warning "DISPLAY_ST7789 Built-in display on ESP32-S3 TFT"
-#include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
+  #warning "DISPLAY_ST7789 Built-in display on ESP32-S3 TFT"
+  #include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
+  #define SCREEN_WIDTH 240
+  #define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
+  #define SIZE_2X            // All text double-size
 
-#define SCREEN_WIDTH 240
-#define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
-#define SIZE_2X            // All text double-size
+  // Use dedicated hardware SPI pins
+  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-// Use dedicated hardware SPI pins
-Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+  #define DISPLAY_BACKLIGHT
+  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
 
-#define DISPLAY_BACKLIGHT
-const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
-
-#define WHITE ST77XX_WHITE
-#define BLACK ST77XX_BLACK
-#define BLUE ST77XX_BLUE
-#define RED ST77XX_RED
-#define GREEN ST77XX_GREEN
-#define CYAN ST77XX_CYAN
-#define MAGENTA ST77XX_MAGENTA
-#define YELLOW ST77XX_YELLOW
+  #define WHITE ST77XX_WHITE
+  #define BLACK ST77XX_BLACK
+  #define BLUE ST77XX_BLUE
+  #define RED ST77XX_RED
+  #define GREEN ST77XX_GREEN
+  #define CYAN ST77XX_CYAN
+  #define MAGENTA ST77XX_MAGENTA
+  #define YELLOW ST77XX_YELLOW
 
 #endif
 
 #ifdef DISPLAY_SH1107
-#warning "DISPLAY_SH1107 - Adafruit OLED either feather 64x128 or external 128x128"
-#include <Adafruit_SH110X.h>
-// SH1107 needs display.display() after drawing
-#define DISPLAY_DISPLAY_CMD
+  #warning "DISPLAY_SH1107 - Adafruit OLED either feather 64x128 or external 128x128"
+  #include <Adafruit_SH110X.h>
+  // SH1107 needs display.display() after drawing
+  #define DISPLAY_DISPLAY_CMD
 
-#ifdef FEATHER_OLED
-const int display_address = 0x3C;
-#define SCREEN_HEIGHT 64
-#else  // standalone OLED
-const int display_address = 0x3D;
-#define SCREEN_HEIGHT 128
-#endif
+  #ifdef FEATHER_OLED
+    const int display_address = 0x3C;
+    #define SCREEN_HEIGHT 64
+  #else  // standalone OLED
+    const int display_address = 0x3D;
+    #define SCREEN_HEIGHT 128
+  #endif
 
-#define SCREEN_WIDTH 128
-#define SIZE_1X
+  #define SCREEN_WIDTH 128
+  #define SIZE_1X
 
-Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
+  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
 
-// Monochrome, all colors are white
-#define WHITE SH110X_WHITE
-#define BLACK SH110X_BLACK
-#define BLUE WHITE
-#define RED WHITE
-#define GREEN WHITE
-#define CYAN WHITE
-#define MAGENTA WHITE
-#define YELLOW WHITE
+  // Monochrome, all colors are white
+  #define WHITE SH110X_WHITE
+  #define BLACK SH110X_BLACK
+  #define BLUE WHITE
+  #define RED WHITE
+  #define GREEN WHITE
+  #define CYAN WHITE
+  #define MAGENTA WHITE
+  #define YELLOW WHITE
 
 #endif
 
 #ifdef DISPLAY_ST7920
-#warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
-#include "ST7920_GFX_Library.h"
+  #warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
+  #include "ST7920_GFX_Library.h"
 
-// SH1107 needs display.display() after drawing
-#define DISPLAY_DISPLAY_CMD
+  // ST7920 needs display.display() after drawing
+  #define DISPLAY_DISPLAY_CMD
 
-// Backlight pin
-#define DISPLAY_BACKLIGHT
-const int backlightPin = 28;
+  // Backlight pin
+  #define DISPLAY_BACKLIGHT
+  const int backlightPin = 28;
 
-#define SCREEN_HEIGHT 64
-#define SCREEN_WIDTH 128
-#define SIZE_1X
+  #define SCREEN_HEIGHT 64
+  #define SCREEN_WIDTH 128
+  #define SIZE_1X
 
-#define CS_PIN 17
-// Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
-ST7920 display(CS_PIN);
+  // Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
+  const int CS_PIN = 0;
+  //const int MOSI_PIN = 19;
+  const int CLK1_PIN = 18;
+  const int CLK2_PIN = 6;
+//  ST7920 LCD RST       [ora]   GP01              2  from lower left
+//  ST7920 LCD CS (RS)   [ylw]   GP00              1
+//  ST7920 LCD SCLK1(E1) [blu]   GP18              5  // Hardware constraint for SPI0CK
+//  ST7920 LCD SCLK2(E2) [pur]   GP06   lower left 0  // Hardware constraint for SPI0CK
+//  ST7920 LCD MOSI (RW) [grn]   GP19              4  // Hardware constraint for SPI0MOSI
+  #define SCREEN_HEIGHT 64
+  #define SCREEN_WIDTH 192
+  //ST7920 display(CS_PIN);
+  ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
 
-// Monochrome, all colors are white
-#define BLUE 1
-#define RED 1
-#define GREEN 1
-#define CYAN 1
-#define MAGENTA 1
-#define YELLOW 1
-// "Black" means background
-#define BLACK 0
-#define WHITE 1
+  // Monochrome, all colors are white
+  // "Black" means background
+  #define BLACK 0
+  #define WHITE 1
+  #define BLUE WHITE
+  #define RED WHITE
+  #define GREEN WHITE
+  #define CYAN WHITE
+  #define MAGENTA WHITE
+  #define YELLOW WHITE
 
 #endif
 
 
 #ifdef SIZE_1X
-// 1x size
-#define SMALL_SIZE 1
-#define LARGE_SIZE 2
-#define ROW_H 8
-#define CHAR_W 6
+  // 1x size
+  #define SMALL_SIZE 1
+  #define LARGE_SIZE 2
+  #define ROW_H 8
+  #define CHAR_W 6
 #else
-// 2x size
-#define SMALL_SIZE 2
-#define LARGE_SIZE 4
-#define ROW_H 16
-#define CHAR_W 12
+  // 2x size
+  #define SMALL_SIZE 2
+  #define LARGE_SIZE 4
+  #define ROW_H 16
+  #define CHAR_W 12
 #endif
 
 uint8_t backlight_brightness = 128;
@@ -314,7 +307,6 @@ void setup_display(void) {
   display.println("Hello, world!");
   display.display();
   delay(2000);
-
 #endif
 
   display.fillScreen(BLACK);

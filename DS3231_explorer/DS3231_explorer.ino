@@ -45,6 +45,7 @@
 
 #ifdef ARDUINO_ARCH_RP2040
   #define DISPLAY_SH1107
+  //#define DISPLAY_ST7920
   // Feather (RP2040) stack - expect SQWV on A2? (external DS3231)
   const uint8_t sqwvPin = 29;  // (A3)
   const int ext_sda_pin = 24;
@@ -126,7 +127,7 @@
   #define SCREEN_HEIGHT 64
   #define SIZE_1X
 
-  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &Wire1);  // Wire1 is the internal I2C on Feather RP2040
+  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &Wire);  // Wire is now the internal I2C on Feather RP2040
 
   // Monochrome, all colors are white
   #define WHITE SH110X_WHITE
@@ -137,6 +138,35 @@
   #define CYAN  WHITE
   #define MAGENTA WHITE
   #define YELLOW  WHITE 
+
+  #define DISPLAY_DISPLAY_CMD
+
+#endif
+
+#ifdef DISPLAY_ST7920
+  #include "ST7920_GFX_Library.h"
+  
+  #define SCREEN_WIDTH  192
+  #define SCREEN_HEIGHT 64
+  #define SIZE_1X
+
+  const int CS_PIN = 0;
+  const int CLK1_PIN = 18;
+  const int CLK2_PIN = 6;
+  // MOSI=19
+  ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
+
+  // Monochrome, all colors are white
+  #define WHITE 1
+  #define BLACK 0
+  #define BLUE  WHITE
+  #define RED   WHITE
+  #define GREEN WHITE
+  #define CYAN  WHITE
+  #define MAGENTA WHITE
+  #define YELLOW  WHITE
+
+  #define DISPLAY_DISPLAY_CMD
 
 #endif
 
@@ -161,6 +191,13 @@ void setup_display(void) {
   display.setRotation(1);
   Serial.println("SH1107 started");
 #endif
+#ifdef DISPLAY_ST7920
+  display.begin();
+  display.setTextSize(1);
+  display.setTextColor(BLACK);
+  display.setRotation(0);
+  Serial.println("ST7920 started");
+#endif
 
   display.fillScreen(BLACK);
 
@@ -169,7 +206,7 @@ void setup_display(void) {
   display.setTextColor(WHITE);
   display.setCursor(0,0);
   display.print("DS3231_explorer");
-#ifdef DISPLAY_SH1107
+#ifdef DISPLAY_DISPLAY_CMD
   display.display();
 #endif
 
@@ -339,7 +376,7 @@ void ds3231_display(class RTC_DS3231& ds3231) {
   display.print(s);
   display.print("   ");
 
-#ifdef DISPLAY_SH1107
+#ifdef DISPLAY_DISPLAY_CMD
   display.display();
 #endif
 }
@@ -1012,12 +1049,12 @@ void setup()
 
 #ifdef ARDUINO_ARCH_RP2040
   // Configure Pico RP2040 I2C
-  Wire.setSDA(ext_sda_pin);
-  Wire.setSCL(ext_scl_pin);
-  Wire.begin();
+  Wire1.setSDA(ext_sda_pin);
+  Wire1.setSCL(ext_scl_pin);
+  Wire1.begin();
   // Wire is initialized inside OLED display
-  //Wire1.begin();
-  #define DS3231_WIRE Wire
+  //Wire.begin();
+  #define DS3231_WIRE Wire1
 #else
   const int ext_sda_pin = A4;
   const int ext_scl_pin = A5;
