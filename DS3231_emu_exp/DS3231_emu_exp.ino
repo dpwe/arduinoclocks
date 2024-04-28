@@ -64,11 +64,11 @@
 //  I2C display SDA  GP2  I2C1SDA    SDA  GP2        (built-in)
 //  I2C display SCL  GP3  I2C1SCL    SCL  GP3        (built-in)
 
-//  ST7920 LCD RST   GP16
-//  ST7920 LCD CS/RS GP17
-//  ST7920 LCD SCLK  GP18
-//  ST7920 LCD MOSI  GP19
-//  Backlight        GP28                            (built-in GP45)
+//  ST7920 LCD RST   GP16                 
+//  ST7920 LCD CS/RS GP17                 GP0
+//  ST7920 LCD SCLK  GP18                 GP18+6 (192x64)
+//  ST7920 LCD MOSI  GP19                 GP19
+//  Backlight        GP28                 GP20       (built-in GP45)
 
 //  BTN A            GP18/20              GP9             GP9      press:           long press: sleep display
 //  BTN B            GP19/21              GP8             GP6      press: inc trim  long press: ?save trim to eeprom
@@ -224,10 +224,8 @@
 
   // Backlight pin
   #define DISPLAY_BACKLIGHT
-  const int backlightPin = 28;
+  const int backlightPin = 20;
 
-  #define SCREEN_HEIGHT 64
-  #define SCREEN_WIDTH 128
   #define SIZE_1X
 
   // Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
@@ -273,17 +271,34 @@
   #define CHAR_W 12
 #endif
 
-uint8_t backlight_brightness = 128;
+uint8_t backlight_brightness = 255;
+
+void set_backlight(int val) {
+  Serial.print("set_backlight:");
+  Serial.println(val);
+#ifdef DISPLAY_BACKLIGHT
+  analogWrite(backlightPin, val);
+#endif
+}
+
+void setup_backlight(int initial_val) {
+#ifdef DISPLAY_BACKLIGHT
+  pinMode(backlightPin, OUTPUT);
+#endif
+  Serial.print("setup_backlight:");
+  Serial.println(initial_val);
+  set_backlight(initial_val);
+}
+
 
 void setup_display(void) {
 #ifdef DISPLAY_SSD1351
   display.begin();
 #endif
-#ifdef DISPLAY_BACKLIGHT
+
   // turn on backlite
-  pinMode(backlightPin, OUTPUT);
-  analogWrite(backlightPin, backlight_brightness);
-#endif
+  setup_backlight(backlight_brightness);
+
 #ifdef DISPLAY_ST7789
   display.init(135, 240);  // Init ST7789 240x135
   display.setRotation(3);
@@ -297,8 +312,6 @@ void setup_display(void) {
   display.setRotation(1);
 #endif
 #ifdef DISPLAY_ST7920
-  pinMode(backlightPin, OUTPUT);
-  analogWrite(backlightPin, backlight_brightness);
   display.begin();
 
   display.setTextSize(1);
@@ -390,10 +403,7 @@ long int skew_us = 0;
 long int last_skew_us = 0;
 // Holds skew_us immediately after GPS sync.
 long int initial_skew_us = 0;
-void display_skew_us(long int skew_microseconds);  // forward dec.
-
-// Modified by button 1, show/hide RTC detail
-bool display_detail = true;
+void display_skew_us(long int skew_microseconds, int x, int y);  // forward dec.
 
 // Set when GPS syncs the time.
 time_t last_gps_sync_unixtime = 0;
@@ -409,8 +419,25 @@ void itoa2(int num, char *s, int base = 10) {
   *s++ = DTOA(num % base);
   *s++ = '\0';
 }
+bool gps_active = false;
 
-void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_active) {
+void display_gps_status(int x, int y) {
+  // GPS status
+  display.setFont();
+  display.setCursor(x * CHAR_W, y * ROW_H);
+  if (gps_active) {
+    display.setTextColor(BLACK, GREEN);
+    display.print("GPS");
+    display.drawLine(x * CHAR_W - 1, y * ROW_H, x * CHAR_W - 1, (y + 1) * ROW_H - 1, WHITE);
+  } else {
+    display.setTextColor(GREEN, BLACK);
+    display.print("   ");
+    display.drawLine(x * CHAR_W - 1, y * ROW_H, x * CHAR_W - 1, (y + 1) * ROW_H - 1, BLACK);
+  }
+  display_skew_us(skew_us, x, y + 1);
+}
+
+void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool display_detail) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
   // HHHH::MMMM::SSSS (double-size)
@@ -430,24 +457,15 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
   display.clearDisplay();
 #endif
 
+  display.setFont();
+
   // Clock source identifier tag
   //display.setTextSize(SMALL_SIZE);
   //display.setTextColor(RED, BLACK);
   //display.setCursor(17 * CHAR_W, 0);
   //display.print(clock_name);
 
-  // GPS status
-  display.setCursor(17 * CHAR_W, 0 * ROW_H);
-  if (gps_active) {
-    display.setTextColor(BLACK, GREEN);
-    display.print("GPS");
-    display.drawLine(17 * CHAR_W - 1, 0 * ROW_H, 17 * CHAR_W - 1, 1 * ROW_H - 1, WHITE);
-  } else {
-    display.setTextColor(GREEN, BLACK);
-    display.print("   ");
-    display.drawLine(17 * CHAR_W - 1, 0 * ROW_H, 17 * CHAR_W - 1, 1 * ROW_H - 1, BLACK);
-  }
-  display_skew_us(skew_us);
+  display_gps_status(16, 0);
 
   // Time, double size.
   display.setTextSize(LARGE_SIZE);
@@ -581,7 +599,7 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
         last_gps_downtime.toString(s);
     }    
     display.print(s);
-}
+  }
 
 #ifdef DISPLAY_DISPLAY_CMD
   display.display();
@@ -590,10 +608,10 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool gps_a
 
 // ------ Skew re: GPS display -----
 
-bool gps_active = false;
+//bool gps_active = false;
 int delta_skew_us = 0;
 
-void display_skew_us(long int skew_microseconds) {
+void display_skew_us(long int skew_microseconds, int x, int y) {
   //Serial.print("display_skew_us=");
   //Serial.println(skew_microseconds);
   char s[5];  // "-0.0\0"
@@ -639,13 +657,13 @@ void display_skew_us(long int skew_microseconds) {
   s[4] = '\0';
   // Now actually display it.
   display.setTextColor(RED, BLACK);
-  display.setCursor(16 * CHAR_W, 1 * ROW_H);
+  display.setCursor(x * CHAR_W, y * ROW_H);
   if (gps_active) {
     display.print(s);
     // Add latest delta too
     s[0] = 30;  // "Up filled triangle" character.
     itoa(delta_skew_us, s + 1, 10);
-    display.setCursor(16 * CHAR_W, 2 * ROW_H);
+    display.setCursor(x * CHAR_W, (y + 1) * ROW_H);
     display.print(s);
   } else {
     display.print("    ");
@@ -949,11 +967,520 @@ void setup_dac(void) {
   }
 }
 
+
+// -------------------
+// Logger
+// -------------------
+bool serial_available = false;
+
+const int SECS_PER_DAY = 24 * 60 * 60;
+const int LOG_DATA_LEN = 120;     // One value per pixel, roughly.
+const int LOG_INTERVAL_SECS = 1 * 60;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const int LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
+const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines occur
+
+int log_data[LOG_DATA_LEN];
+time_t log_times[LOG_DATA_LEN];
+int data_min = 70;
+int data_max = 75;
+
+#define INVALID_TIME (-1)
+
+void init_data(int init_val, time_t init_time) {
+  for (int i = 0; i < LOG_DATA_LEN; ++i) {
+    log_data[i] = init_val;
+    log_times[i] = init_time;
+  }
+  set_min_max(log_data, log_times, LOG_DATA_LEN, &data_min, &data_max);
+}
+
+void set_min_max(int *log_data, time_t *data_valid, int log_data_len, int *pdata_min, int *pdata_max) {
+  int data_min = 0;
+  int data_max = 0;
+  bool seen_valid_data = false;
+  for (int i = 0; i < log_data_len; ++i) {
+    if (data_valid[i] != INVALID_TIME) {
+      int new_data = log_data[i];
+      if (seen_valid_data) {
+        data_min = min(data_min, new_data);
+        data_max = max(data_max, new_data);
+      } else {
+        data_min = new_data;
+        data_max = new_data;
+        seen_valid_data = true;
+      }
+    }
+  }
+  if (seen_valid_data) {
+    // Ensure there's a nonzero range in the data.
+    *pdata_min = min(data_min, data_max - 1);
+    *pdata_max = max(data_max, data_min + 1);
+  }
+}
+
+void update_most_recent_data(int new_data) {
+  // Simply change the final data point (provided it's already been set).
+  if (log_times[LOG_DATA_LEN - 1] != INVALID_TIME) {
+    log_data[LOG_DATA_LEN - 1] = new_data;
+  }
+}
+
+void push_data(int new_data, time_t new_time) {
+  // Move forward data
+  if (serial_available) {
+     Serial.print("new_data: ");
+     Serial.println(new_data);
+  }
+  for (int i = 0; i < LOG_DATA_LEN - 1; ++i) {
+    log_data[i] = log_data[i + 1];
+    log_times[i] = log_times[i + 1];
+  }
+  log_data[LOG_DATA_LEN - 1] = new_data;
+  log_times[LOG_DATA_LEN - 1] = new_time;
+  // Reset the min/max limits based on current data.
+  set_min_max(log_data, log_times, LOG_DATA_LEN, &data_min, &data_max);
+}
+
+time_t last_log_time = 0;
+
+void update_logger(int data_val, time_t data_time) {
+  // Defer recording first point until we're on an integral multiple of the log interval.
+  if (last_log_time == 0 && (data_time % LOG_INTERVAL_SECS) != 0)  return;
+  if ( (data_time - last_log_time + LOG_MAX_TIME_PERIOD_SECS) % LOG_MAX_TIME_PERIOD_SECS >= LOG_INTERVAL_SECS) {
+    // Time to log a new value.
+    last_log_time = data_time;
+    // Record new temperature every minute.
+    push_data(data_val, data_time);
+  } else {
+    // Update the most recent data so that logger shows current temp.
+    //update_most_recent_data(data_val);
+    // Skip this because plotting outside the current min/max range leaves permanent cruft on GFX display.
+  }
+}
+
+void setup_logger(void) {
+  // Called during power up.  Clear logger to current time, value.
+  init_data(0, INVALID_TIME);
+}
+
+//------------------------
+// Logger  Display
+//------------------------
+
+// Layout
+#if SCREEN_HEIGHT == 135
+const int16_t overall_top_y = 0;
+const int16_t date_midline_y = overall_top_y + 16;
+const int16_t time_midline_y = overall_top_y + 52;
+const int16_t seconds_midline_y = overall_top_y + 80;
+const int16_t log_top_y = overall_top_y + 102;
+const int16_t log_width = 192;
+const int16_t log_height = 32;
+const int16_t display_mid_x = 120;
+const int8_t secs_x_scale = 3;
+const int8_t secs_height = 8;
+#include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
+#include <Fonts/CalBlk36.h>
+#include <Fonts/HD44780.h>
+#define SMALLFONT &FreeSans12pt7b
+#define MICROFONT &HD44780
+#define MICROFONT_H  (8)
+#define MICROFONT_W  (6)
+#define CalBlk36 &CalBlk3612pt7b
+#endif
+#if SCREEN_HEIGHT == 64
+const int16_t overall_top_y = 0;
+const int16_t date_midline_y = overall_top_y + 3;
+const int16_t time_midline_y = overall_top_y + 25;
+const int16_t seconds_midline_y = overall_top_y + 36;
+const int16_t log_top_y = overall_top_y + 43;
+const int16_t log_width = 128;
+const int16_t log_height = 21;
+const int16_t display_mid_x = 64;
+const int8_t secs_x_scale = 2;
+const int8_t secs_height = 2;
+#include <Fonts/CalBlk36.h>
+#include <Fonts/HD44780.h>
+#include <Fonts/TomThumb.h>
+#define SMALLFONT &HD44780
+#define MICROFONT &TomThumb
+#define MICROFONT_W (4)
+#define MICROFONT_H (6)
+#define CalBlk36 &CalBlk3612pt7b
+#endif
+
+uint16_t big_colon_width = 0;
+uint16_t big_colon_height = 0;
+uint16_t digits_width = 0;
+uint16_t digits_height = 0;
+uint16_t digits_baseline_shift = 0;
+uint16_t date_width = 0;
+const char *datefmt = "DDD YYYY-MM-DD";
+
+// 565 RGB 16-bit colors
+int fgcolor = WHITE; // ST77XX_WHITE;
+int bgcolor = BLACK; // Bright blueish-green // ST77XX_BLACK;
+
+enum text_alignment {
+  TOP,
+  MIDDLE,
+  BOTTOM,
+  LEFT,
+  RIGHT,
+};
+
+void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y_align = MIDDLE,
+                int16_t clear_width=0, int16_t clear_height=0, bool debug=false, int16_t font_hshift=0) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(s, x, y, &x1, &y1, &w, &h);
+  y1 = y;
+  x1 = x;
+  if (x_align == MIDDLE) {x1 -= w / 2;}
+  else if (x_align == RIGHT) {x1 -= w;}
+  if (y_align == MIDDLE) {y1 += h / 2;}
+  else if (y_align == TOP) {y1 += h;}
+  if (clear_width) {
+    if (x_align == RIGHT) {
+      // If clear_width != w, make the right edges line up (not the left).
+      // Need to stretch right edge to cover 11->12 transition.
+      display.fillRect(x - clear_width, y1 - h + 1, clear_width + 4, clear_height, bgcolor);
+      //display.drawRect(x - clear_width, y1 - h + 1, clear_width + 4, clear_height, fgcolor);
+    } else {
+      display.fillRect(x - 1, y1 - h + 1, clear_width + 2, clear_height, bgcolor);
+      //display.drawRect(x - 1, y1 - h + 1, clear_width + 2, clear_height, fgcolor);
+    }
+  }
+  display.setCursor(x1, y1 + font_hshift);
+  display.print(s);
+}
+
+void setup_logger_display(void) {
+  display.setFont(CalBlk36);
+  //display.setTextSize(2);
+  int16_t  x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(":", (int16_t)0, (int16_t)0, &x1, &y1, &big_colon_width, &big_colon_height);
+  big_colon_width += 1;
+  big_colon_height += 1;
+  display.getTextBounds("00", (int16_t)0, (int16_t)0, &x1, &y1, &digits_width, &digits_height);
+  // Need to clear a little further.
+  digits_width += 1;
+  digits_height += 1;
+#if SCREEN_HEIGHT == 64
+  big_colon_height -= 11;
+  digits_height -= 11;
+  digits_baseline_shift = -10;
+#endif
+
+  display.setTextColor(fgcolor);
+
+  display.setFont(MICROFONT);
+  display.setCursor(SCREEN_WIDTH - MICROFONT_W, MICROFONT_H);
+  display.print("S");
+  if (serial_available) {
+    Serial.println(F("Initialized"));
+  } else {
+    display.setCursor(SCREEN_WIDTH - MICROFONT_W, MICROFONT_H);
+    display.print("#");    
+  }
+
+#ifdef DISPLAY_DISPLAY_CMD
+  display.display();
+#endif
+}
+
+char *sprint_int2(char *s, uint8_t n)
+{  // Always 2 digits, assume n nonnegative, < 99.
+  *s++ = '0' + (n / 10);
+  *s++ = '0' + (n % 10);
+  return s;
+}
+
+char *sprint_int(char *s, int n, int decimal_place=0)
+{ // Print a signed int as may places as needed. 
+  // returns next char* to write to string.
+  // If decimal place > 0, assumed passed int is value * 10**decimal_place
+  // and print a decimal place.
+  if (n < 0) {
+    *s++ = '-';
+    n = -n;
+  }
+  if (n > 9 || decimal_place > 0) {
+     s = sprint_int(s, n / 10, decimal_place - 1);
+  }
+  if (decimal_place == 1) {
+    *s++ = '.';
+  }
+  *s++ = '0' + (n % 10);
+  return s;
+}
+
+int y_offset_per_data(int data_y, int mid_y) {
+    if (data_y >= mid_y) {
+    return -1;  // Line is in lower half; label above final point.
+  } else {
+    return 1 + MICROFONT_H;   // Line is in upper half; label below final point.
+  }
+}
+
+void draw_time(int x, int y, int day_mins, bool show_minutes=true) {
+  // Plot a time as HH:MM (or just HH if not show_minutes) using tiny font.
+  // x, y is bottom-left
+  char str[3];
+  *(sprint_int2(str, day_mins / 60)) = '\0';
+  display.setCursor(x, y);
+  display.print(str);
+  if (show_minutes) {
+    *(sprint_int2(str, day_mins % 60)) = '\0';
+    display.setCursor(x + 2 * MICROFONT_W + 2, y);
+    display.print(str);   // Over by 2 chr + 2 px for colon.
+    // Add colon.
+    display.fillRect(x + 2 * MICROFONT_W, y - 3, 1, 1, fgcolor);
+    display.fillRect(x + 2 * MICROFONT_W, y - 1, 1, 1, fgcolor);
+  }
+}
+
+void draw_log_output(int x, int y, int w, int h) {
+  // Clear canvas
+  display.fillRect(x, y - 1, w, h + 2, bgcolor);
+  //display.setTextSize(1);
+  // Figure scaling
+  display.setFont(MICROFONT);
+  const int legend_w = 3 * MICROFONT_W; // for legends up to 3 digits.
+  uint8_t data_x = x + legend_w;
+  uint8_t data_w = w - legend_w;
+  int data_scale = (h - 1) * 256 / (data_max - data_min);
+  uint8_t last_x;
+  bool last_x_valid = false;
+  uint8_t last_y = y;
+  int last_data = 0;
+  uint8_t first_x = 0;
+  uint8_t first_y = 0;
+  time_t first_time_mins = INVALID_TIME;
+  int last_subdiv = -1;
+  for (int i = 0; i < LOG_DATA_LEN; ++i) {
+    last_data = log_data[i];
+    if (log_times[i] != INVALID_TIME) {
+      time_t localtime = log_times[i] - 4 * 60 * 60;
+      int new_y = y + (h - 1) - ((data_scale * (last_data - data_min)) >> 8);
+      int new_x = data_x + (i * (data_w - 1) / (LOG_DATA_LEN - 1));
+      if (last_x_valid) {
+        display.drawLine(last_x, last_y, new_x, new_y, fgcolor);
+      }
+      // Add vertical lines every 6h transition.
+      int subdiv = localtime  / SUBDIV_SECS;
+      if (subdiv != last_subdiv) {
+        if (last_subdiv >= 0) {
+          display.drawLine(new_x, y, new_x, y + h, fgcolor);
+          // Label it with 2 digits to the left.
+          int vert_line_legend_x = new_x - (2 * MICROFONT_W);
+          // Don't draw if it's going to splay off the left.
+          if (vert_line_legend_x >= data_x) {
+            draw_time(vert_line_legend_x, y - 1 + MICROFONT_H, ((subdiv * SUBDIV_SECS) % SECS_PER_DAY) / 60, /* show_minutes= */ false);
+          }
+        }
+        last_subdiv = subdiv;
+      }
+      last_x = new_x;
+      last_y = new_y;
+      last_x_valid = true;
+      if (first_time_mins == INVALID_TIME) {
+        first_time_mins = (localtime % SECS_PER_DAY) / 60;
+        first_x = last_x;
+        first_y = last_y;  // Needed to position earliest timestamp below.
+      }
+    }
+  }
+  // Text labels.
+  char legend_str[6];
+  int mid_y = (y + h / 2);
+  // Do we have some actual data?
+  if (last_x_valid) {
+    // Add time of earliest point.
+    // Bias time to be below if it's at the mid point so that it might miss the current value.
+    int y_offset = y_offset_per_data(first_y - 1, mid_y);
+    // Only draw first_time if it doesn't impinge on legend at left.
+    int first_time_x = first_x - (4 * MICROFONT_W + 1);
+    if (first_time_x >= data_x) {
+      draw_time(first_time_x, first_y + y_offset, first_time_mins);
+    }
+    // Label current value.
+    y_offset = y_offset_per_data(last_y, mid_y);
+    *(sprint_int(legend_str, last_data)) = '\0';
+    display.setCursor(last_x - MICROFONT_W * strlen(legend_str) + 2, last_y + y_offset);
+    display.print(legend_str);
+  }
+  // Add legend at left.
+  *(sprint_int(legend_str, data_max)) = '\0';
+  display.setCursor(x, y + MICROFONT_H);
+  display.print(legend_str);
+  *(sprint_int(legend_str, data_min)) = '\0';
+  display.setCursor(x, y + h);
+  display.print(legend_str);  // Font is 6 pixels high.
+  //display.setTextSize(2);
+}
+
+int8_t last_day = 0, last_hour = -1, last_minute = -1;
+uint8_t colon_visible = true;
+
+char dow_names[] = "SunMonTueWedThuFriSat";
+
+void sprint_date(class DateTime& dt, char* datestr) {
+  // Fake dt.toString for our format.  Pad each end with spaces to get proper clearing of previous.
+  int dow = dt.dayOfTheWeek() % 7;
+  char *s = datestr;
+  *s++ = ' ';
+  for (int i = 0; i < 3; ++i) {
+    *s++ = dow_names[3 * dow + i];
+  }
+  *s++ = ' ';
+  s = sprint_int(s, dt.year());
+  *s++ = '-';
+  s = sprint_int2(s, dt.month());
+  *s++ = '-';
+  s = sprint_int2(s, dt.day()); 
+  *s++ = ' ';
+  *s++ = '\0';
+}
+
+//#include <Timezone.h>       // https://github.com/JChristensen/Timezone
+//// US Eastern Time Zone (New York, Detroit)
+//TimeChangeRule myDST = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
+//TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
+//Timezone myTZ(myDST, mySTD);
+
+int logger_display(time_t t, uint8_t redraw=false) {
+  // Returns minutes within day (0..1440).
+  //u8g2.clearBuffer();   // for _F_ initializer only
+  //display.fillScreen(bgcolor);
+
+  int mid_x = display_mid_x;
+
+  //time_t localtime = myTZ.toLocal(t);
+  //time_t localtime = t - 4 * 60 * 60;
+  //DateTime dt(localtime);
+  t -= 4 * 60 * 60;
+  DateTime dt(t);
+
+  //serial_print_tm(tm);
+  int mins_within_day = 60 * dt.hour() + dt.minute();
+  if (redraw || dt.day() != last_day) {
+    display.clearDisplay();
+    last_day = dt.day();
+    char datestr[24];
+    strcpy(datestr, datefmt);
+    //dt.toString(datestr);
+    sprint_date(dt, datestr);    
+    // Date.
+    display.setFont(SMALLFONT);
+    int16_t  x1, y1;
+    uint16_t w, h;
+    display.getTextBounds(datestr, (int16_t)0, (int16_t)0, &x1, &y1, &w, &h);
+    //display.drawRect(mid_x - w/2 - 8, date_midline_y - h/2 - 1, w + 16, h + 2, fgcolor);      
+    print_text(datestr, mid_x - w/2, date_midline_y - h / 2 - 1, LEFT, TOP, w + 16, h, true);
+    //print_text(datestr, 0, 0, LEFT, TOP, w + 16, h, true);
+  }
+
+  colon_visible = !colon_visible;
+
+  // Big digits layout
+  const int time_y = time_midline_y;
+
+  // Seconds progress bar frame.
+  // Seconds bar dimensions
+  const uint8_t base_y = seconds_midline_y + secs_height / 2;
+  const uint8_t base_x = mid_x - secs_x_scale * 30;
+  if (redraw) {
+    // Box around the second progress bar, 1 pixel separated.
+    display.drawRect(base_x - 2, base_y - 2, 60 * secs_x_scale + 4, secs_height + 4, fgcolor);
+  }
+  // Bar width goes from 1 to 60 (instead of 0 to 59), so we have to work with one second ago.
+  int prev_minute = dt.minute();
+  int prev_second = dt.second() - 1;
+  if (prev_second < 0) {
+    prev_minute = (prev_minute + 59) % 60;
+    prev_second += 60;
+  }
+  // Bar width goes from 1 to 60 (instead of 0 to 59)
+  uint8_t bar_width = secs_x_scale * (1 + prev_second);
+  if ((prev_minute & 1) == 0) {
+    // bar growing from left
+    display.fillRect(base_x, base_y, bar_width, secs_height, fgcolor);
+  } else {
+    // bar shrinking to right
+    if (redraw)
+      display.fillRect(base_x, base_y, secs_x_scale * 60, secs_height, fgcolor);
+    display.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
+  }
+
+  // Logging plot setup
+  const int log_x = mid_x - (log_width >> 1);
+  const int log_y = log_top_y;
+  const int log_w = log_width;
+  const int log_h = log_height;
+
+  {
+    // Large digits time.
+    display.setFont(CalBlk36);
+    char digit_string[3];
+    //mid_x -= big_colon_width;
+    if (redraw || dt.hour() != last_hour) {
+      last_hour = dt.hour();
+      sprint_int2(digit_string, dt.hour());
+      digit_string[2] = '\0';
+      print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, 
+                RIGHT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
+    }
+    if (colon_visible) {
+      // We're still in CalBlk36 mode.
+      print_text((char *)":", mid_x, time_midline_y + digits_baseline_shift);
+    } else {
+      display.fillRect(mid_x - 1 - 4, time_midline_y - (big_colon_height >> 1) - 4,
+                  big_colon_width, big_colon_height, bgcolor);
+    }
+  }
+  if (redraw || dt.minute() != last_minute) {
+    char digit_string[3];
+    last_minute = dt.minute();
+    sprint_int2(digit_string, dt.minute());
+    digit_string[2] = '\0';
+    print_text(digit_string, mid_x + (big_colon_width/2) + 2, time_midline_y,
+               LEFT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
+    // Update log when minutes change.
+    draw_log_output(log_x, log_y, log_w, log_h);
+  }
+
+  display_gps_status(22, 0);
+
+#ifdef DISPLAY_DISPLAY_CMD
+  display.display();
+#endif
+
+  return mins_within_day;
+}
+
+// ------------- modal display --------------
+// How many different values can display_mode take on?
+#define NUM_DISPLAY_MODES 3
+static int display_mode = 0;
+
+void update_display(void) {
+  if (display_mode == 0) {
+    ds3231_display(ds3231, "unused", /*display_detail= */true);
+  } else if (display_mode == 1) {
+    ds3231_display(ds3231, "unused", /* display_detail= */false);
+  } else {
+    logger_display(ds3231.now().unixtime(), /* redraw= */true);
+  }
+}
+
 // ---------------------- CLI -----------------------------------------
 // DS3231 Explorer: Input commands over serial line
 
 // ms to pause between polling calls.  0=disable polling.
-int polling_interval = 0;
+int polling_interval = 0;  // 0=don't poll.
 
 // Flag as to whether to respond to a falling edge on sqwvPin by reading time.
 bool enable_sqwv_int = true;
@@ -1080,7 +1607,7 @@ void cmd_prompt() {
 const int16_t ds3231_freqs[4] = { 1, 1024, 4096, 8192 };
 
 // Trim subtracted from predelay on GPS sync.
-int32_t predelay_trim_us = 0;
+int32_t predelay_trim_us = 500;
 
 // Predeclare flag for triggering sync.
 bool request_RTC_sync = false;
@@ -1249,9 +1776,7 @@ void handle_cmd(char cmd, char *arg) {
       if (alen) {
         backlight_brightness = atoi(arg);
         if (display_on) {
-#ifdef DISPLAY_BACKLIGHT
-          analogWrite(backlightPin, backlight_brightness);
-#endif
+          set_backlight(backlight_brightness);
         }
       }
       Serial.print("Backlight brightness (0..255)=");
@@ -1490,10 +2015,10 @@ bool gps_time_valid(class TinyGPS &gps) {
   // It's only valid if it was updated within the past second.
   unsigned long time, age_millis;
   gps.get_datetime(0, &time, &age_millis);
-  Serial.print("gps_time=");
-  Serial.print(time);
-  Serial.print(" age_millis=");
-  Serial.println(age_millis);
+  //Serial.print("gps_time=");
+  //Serial.print(time);
+  //Serial.print(" age_millis=");
+  //Serial.println(age_millis);
   return (time != gps.GPS_INVALID_TIME) && (age_millis < 1000);
 }
 
@@ -1992,7 +2517,7 @@ int temperature_get(void) {
 #endif               // !RP2040
 
 // ----- DS3231 emulation -----
-#include "RTClib.h"  // For DateTime etc.
+//#include "RTClib.h"  // For DateTime etc.
 static uint8_t bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
 static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
 static uint8_t dowToDS3231(uint8_t d) { return d == 0 ? 7 : d; }
@@ -2253,12 +2778,9 @@ void print_gps_skew(void) {
 
 void wake_up_display(void) {
   Serial.println("wake_display");
-#ifdef DISPLAY_BACKLIGHT
-  // turn on backlite
-  analogWrite(backlightPin, backlight_brightness);
-#endif
+  set_backlight(backlight_brightness);
   display_on = true;
-  ds3231_display(ds3231, clock_name, gps_active);
+  update_display();
 }
 
 void sleep_display(void) {
@@ -2269,10 +2791,8 @@ void sleep_display(void) {
 #else
   display.fillScreen(BLACK);
 #endif
-#ifdef DISPLAY_BACKLIGHT
   // turn off backlite
-  analogWrite(backlightPin, 0);
-#endif
+  set_backlight(0);
   display_on = false;
 }
 
@@ -2381,7 +2901,7 @@ void buttons_update(void) {
         if (long_press) {
           sleep_display();
         } else {
-          display_detail = !display_detail;
+          display_mode = (display_mode + 1) % NUM_DISPLAY_MODES;
         }
         break;
       case 1:
@@ -2477,7 +2997,7 @@ void write_registers_fn(uint8_t reg, const uint8_t* buffer, uint8_t num) {
 // ----------------- Merged emu and exp setup() and loop() ------------------------
 
 #define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
-bool serial_available = false;
+//bool serial_available = false;
 void open_serial(int baudrate=9600) {
   Serial.begin(baudrate);
   // Wait for Serial port to open
@@ -2532,6 +3052,10 @@ void setup()
   Serial.println("about to setup_display...");
   setup_display();
 
+  Serial.println("about to setup_logger + display...");
+  setup_logger();
+  setup_logger_display();
+
   // GPS input
   Serial.println("about to setup_GPS_serial...");
   setup_GPS_serial();
@@ -2559,6 +3083,10 @@ void setup()
   // DAC setup
   Serial.println("about to DAC setup...");
   setup_dac();
+
+  // Seems likke this doesn't take when we do it inside setup_display, try again now.
+  set_backlight(backlight_brightness);
+
 }
 
 int last_sec = 0;
@@ -2620,10 +3148,11 @@ void loop() {
       last_sec = now_sec;
       //update_display(dt);
       if(display_on) {
-        ds3231_display(ds3231, clock_name, gps_active);
+        update_display();
       }
       //Serial.print("tick - gps=");
       //Serial.println((long int)(tick_micros - gps_micros));
+      if (raw_tick_count > 10)  update_logger((int)(tick_micros - gps_micros), dt.unixtime());
     }
   }
 
