@@ -458,9 +458,9 @@ const int8_t secs_height = 8;
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
 #include <Fonts/CalBlk36.h>
+#include <Fonts/HD44780.h>
 #define SMALLFONT &FreeSans12pt7b
-#define SMALL_VSHIFT  (0)
-#define MICROFONT
+#define MICROFONT &HD44780
 #define MICROFONT_H  (8)
 #define MICROFONT_W  (6)
 //#define CalBlk36 &FreeSansBold24pt7b
@@ -478,9 +478,9 @@ const int16_t display_mid_x = 64;
 const int8_t secs_x_scale = 2;
 const int8_t secs_height = 2;
 #include <Fonts/CalBlk36.h>
+#include <Fonts/HD44780.h>
 #include <Fonts/TomThumb.h>
-#define SMALLFONT 
-#define SMALL_VSHIFT  (-6)
+#define SMALLFONT &HD44780
 #define MICROFONT &TomThumb
 #define MICROFONT_W (4)
 #define MICROFONT_H (6)
@@ -798,8 +798,8 @@ int update_display(time_t t, uint8_t redraw=false) {
     uint16_t w, h;
     display.getTextBounds(datestr, (int16_t)0, (int16_t)0, &x1, &y1, &w, &h);
     //display.drawRect(mid_x - w/2 - 8, date_midline_y - h/2 - 1, w + 16, h + 2, fgcolor);      
-    print_text(datestr, mid_x - w/2, date_midline_y - h / 2 - 1, LEFT, TOP, w + 16, h, true, SMALL_VSHIFT);
-    //print_text(datestr, 0, 0, LEFT, TOP, w + 16, h, true, SMALL_VSHIFT);
+    print_text(datestr, mid_x - w/2, date_midline_y - h / 2 - 1, LEFT, TOP, w + 16, h, true);
+    //print_text(datestr, 0, 0, LEFT, TOP, w + 16, h, true);
   }
 
   colon_visible = !colon_visible;
@@ -850,7 +850,7 @@ int update_display(time_t t, uint8_t redraw=false) {
       sprint_int2(digit_string, tm.Hour);
       digit_string[2] = '\0';
       print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, 
-                RIGHT, MIDDLE, digits_width, digits_height, false,  digits_baseline_shift);
+                RIGHT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
     }
     if (colon_visible) {
       // We're still in CalBlk36 mode.
