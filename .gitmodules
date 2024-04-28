@@ -1,0 +1,3 @@
+[submodule "libraries/ST7920_GFX_Library"]
+	path = libraries/ST7920_GFX_Library
+	url = https://github.com/dpwe/ST7920_GFX_Library.git
