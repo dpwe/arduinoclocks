@@ -2588,6 +2588,8 @@ void ds3231_setup() {
   encode_time_to_regs(DateTime(2000, 1, 1, 0, 0, 0), registers);
   // Initialize temperature to something plausible, 25.0 C
   registers[DS3231_TEMPERATUREREG] = 25;
+  // Initialize Aging specifically for RP2040 with Abracon OCXO
+  registers[DS3231_AGING] = 20;
 
   // Copy to 2nd registers.
   for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
