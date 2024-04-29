@@ -64,7 +64,7 @@
 //  I2C display SDA  GP2  I2C1SDA    SDA  GP2        (built-in)
 //  I2C display SCL  GP3  I2C1SCL    SCL  GP3        (built-in)
 
-//  ST7920 LCD RST   GP16                 
+//  ST7920 LCD RST   GP16
 //  ST7920 LCD CS/RS GP17                 GP0
 //  ST7920 LCD SCLK  GP18                 GP18+6 (192x64)
 //  ST7920 LCD MOSI  GP19                 GP19
@@ -104,30 +104,30 @@
 #include <RTClib.h>  // Adafruit; defines RTC_DS3231
 
 #ifdef ARDUINO_ARCH_RP2040
-  #ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
-    #define FEATHER_RP2040
-    //#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
-    //#define FEATHER_OLED    // Different address than ext OLED.
-    #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
-  #else
-    #define MY_PICO_RP2040
-    #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
-  #endif
-  // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
-  // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
-  const int ext_sda_pin = 24;
-  const int ext_scl_pin = 25;
-  #define EXT_I2C Wire1
-  const int int_sda_pin = 2;
-  const int int_scl_pin = 3;
-  #define INT_I2C Wire
-#else // ESP32-S3
-  const int ext_sda_pin = A4;
-  const int ext_scl_pin = A5;
-  #define EXT_I2C Wire1
-  #define INT_I2C Wire
-  #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
-  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+#ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
+#define FEATHER_RP2040
+//#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+//#define FEATHER_OLED    // Different address than ext OLED.
+#define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
+#else
+#define MY_PICO_RP2040
+#define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
+#endif
+// Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
+// must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
+const int ext_sda_pin = 24;
+const int ext_scl_pin = 25;
+#define EXT_I2C Wire1
+const int int_sda_pin = 2;
+const int int_scl_pin = 3;
+#define INT_I2C Wire
+#else  // ESP32-S3
+const int ext_sda_pin = A4;
+const int ext_scl_pin = A5;
+#define EXT_I2C Wire1
+#define INT_I2C Wire
+#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+//#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
 #endif
 
 
@@ -136,139 +136,139 @@
 #include <Adafruit_GFX.h>
 
 #ifdef DISPLAY_SSD1351
-  #warning "DISPLAY_SSD1351 128x128 OLED"
-  #include <Adafruit_SSD1351.h>
-  // Screen dimensions
-  #define SCREEN_WIDTH 128
-  #define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
-  #define SIZE_1X
-  // Hardware SPI pins
-  // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
-  // an output.
-  #define DC_PIN 4
-  #define CS_PIN 5
-  #define RST_PIN 6
-  Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
-  // Color definitions
-  #define BLACK 0x0000
-  #define BLUE 0x001F
-  #define RED 0xF800
-  #define GREEN 0x07E0
-  #define CYAN 0x07FF
-  #define MAGENTA 0xF81F
-  #define YELLOW 0xFFE0
-  #define WHITE 0xFFFF
+#warning "DISPLAY_SSD1351 128x128 OLED"
+#include <Adafruit_SSD1351.h>
+// Screen dimensions
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
+#define SIZE_1X
+// Hardware SPI pins
+// (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
+// an output.
+#define DC_PIN 4
+#define CS_PIN 5
+#define RST_PIN 6
+Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
+// Color definitions
+#define BLACK 0x0000
+#define BLUE 0x001F
+#define RED 0xF800
+#define GREEN 0x07E0
+#define CYAN 0x07FF
+#define MAGENTA 0xF81F
+#define YELLOW 0xFFE0
+#define WHITE 0xFFFF
 #endif
 
 #ifdef DISPLAY_ST7789
-  #warning "DISPLAY_ST7789 Built-in display on ESP32-S3 TFT"
-  #include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
-  #define SCREEN_WIDTH 240
-  #define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
-  #define SIZE_2X            // All text double-size
+#warning "DISPLAY_ST7789 Built-in display on ESP32-S3 TFT"
+#include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
+#define SCREEN_WIDTH 240
+#define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
+#define SIZE_2X            // All text double-size
 
-  // Use dedicated hardware SPI pins
-  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+// Use dedicated hardware SPI pins
+Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-  #define DISPLAY_BACKLIGHT
-  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
+#define DISPLAY_BACKLIGHT
+const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
 
-  #define WHITE ST77XX_WHITE
-  #define BLACK ST77XX_BLACK
-  #define BLUE ST77XX_BLUE
-  #define RED ST77XX_RED
-  #define GREEN ST77XX_GREEN
-  #define CYAN ST77XX_CYAN
-  #define MAGENTA ST77XX_MAGENTA
-  #define YELLOW ST77XX_YELLOW
+#define WHITE ST77XX_WHITE
+#define BLACK ST77XX_BLACK
+#define BLUE ST77XX_BLUE
+#define RED ST77XX_RED
+#define GREEN ST77XX_GREEN
+#define CYAN ST77XX_CYAN
+#define MAGENTA ST77XX_MAGENTA
+#define YELLOW ST77XX_YELLOW
 
 #endif
 
 #ifdef DISPLAY_SH1107
-  #warning "DISPLAY_SH1107 - Adafruit OLED either feather 64x128 or external 128x128"
-  #include <Adafruit_SH110X.h>
-  // SH1107 needs display.display() after drawing
-  #define DISPLAY_DISPLAY_CMD
+#warning "DISPLAY_SH1107 - Adafruit OLED either feather 64x128 or external 128x128"
+#include <Adafruit_SH110X.h>
+// SH1107 needs display.display() after drawing
+#define DISPLAY_DISPLAY_CMD
 
-  #ifdef FEATHER_OLED
-    const int display_address = 0x3C;
-    #define SCREEN_HEIGHT 64
-  #else  // standalone OLED
-    const int display_address = 0x3D;
-    #define SCREEN_HEIGHT 128
-  #endif
+#ifdef FEATHER_OLED
+const int display_address = 0x3C;
+#define SCREEN_HEIGHT 64
+#else  // standalone OLED
+const int display_address = 0x3D;
+#define SCREEN_HEIGHT 128
+#endif
 
-  #define SCREEN_WIDTH 128
-  #define SIZE_1X
+#define SCREEN_WIDTH 128
+#define SIZE_1X
 
-  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
+Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
 
-  // Monochrome, all colors are white
-  #define WHITE SH110X_WHITE
-  #define BLACK SH110X_BLACK
-  #define BLUE WHITE
-  #define RED WHITE
-  #define GREEN WHITE
-  #define CYAN WHITE
-  #define MAGENTA WHITE
-  #define YELLOW WHITE
+// Monochrome, all colors are white
+#define WHITE SH110X_WHITE
+#define BLACK SH110X_BLACK
+#define BLUE WHITE
+#define RED WHITE
+#define GREEN WHITE
+#define CYAN WHITE
+#define MAGENTA WHITE
+#define YELLOW WHITE
 
 #endif
 
 #ifdef DISPLAY_ST7920
-  #warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
-  #include "ST7920_GFX_Library.h"
+#warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
+#include "ST7920_GFX_Library.h"
 
-  // ST7920 needs display.display() after drawing
-  #define DISPLAY_DISPLAY_CMD
+// ST7920 needs display.display() after drawing
+#define DISPLAY_DISPLAY_CMD
 
-  // Backlight pin
-  #define DISPLAY_BACKLIGHT
-  const int backlightPin = 20;
+// Backlight pin
+#define DISPLAY_BACKLIGHT
+const int backlightPin = 20;
 
-  #define SIZE_1X
+#define SIZE_1X
 
-  // Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
-  const int CS_PIN = 0;
-  //const int MOSI_PIN = 19;
-  const int CLK1_PIN = 18;
-  const int CLK2_PIN = 6;
+// Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
+const int CS_PIN = 0;
+//const int MOSI_PIN = 19;
+const int CLK1_PIN = 18;
+const int CLK2_PIN = 6;
 //  ST7920 LCD RST       [ora]   GP01              2  from lower left
 //  ST7920 LCD CS (RS)   [ylw]   GP00              1
 //  ST7920 LCD SCLK1(E1) [blu]   GP18              5  // Hardware constraint for SPI0CK
 //  ST7920 LCD SCLK2(E2) [pur]   GP06   lower left 0  // Hardware constraint for SPI0CK
 //  ST7920 LCD MOSI (RW) [grn]   GP19              4  // Hardware constraint for SPI0MOSI
-  #define SCREEN_HEIGHT 64
-  #define SCREEN_WIDTH 192
-  //ST7920 display(CS_PIN);
-  ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
+#define SCREEN_HEIGHT 64
+#define SCREEN_WIDTH 192
+//ST7920 display(CS_PIN);
+ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
 
-  // Monochrome, all colors are white
-  // "Black" means background
-  #define BLACK 0
-  #define WHITE 1
-  #define BLUE WHITE
-  #define RED WHITE
-  #define GREEN WHITE
-  #define CYAN WHITE
-  #define MAGENTA WHITE
-  #define YELLOW WHITE
+// Monochrome, all colors are white
+// "Black" means background
+#define BLACK 0
+#define WHITE 1
+#define BLUE WHITE
+#define RED WHITE
+#define GREEN WHITE
+#define CYAN WHITE
+#define MAGENTA WHITE
+#define YELLOW WHITE
 
 #endif
 
 
 #ifdef SIZE_1X
-  // 1x size
-  #define SMALL_SIZE 1
-  #define LARGE_SIZE 2
-  #define ROW_H 8
-  #define CHAR_W 6
+// 1x size
+#define SMALL_SIZE 1
+#define LARGE_SIZE 2
+#define ROW_H 8
+#define CHAR_W 6
 #else
-  // 2x size
-  #define SMALL_SIZE 2
-  #define LARGE_SIZE 4
-  #define ROW_H 16
-  #define CHAR_W 12
+// 2x size
+#define SMALL_SIZE 2
+#define LARGE_SIZE 4
+#define ROW_H 16
+#define CHAR_W 12
 #endif
 
 uint8_t backlight_brightness = 255;
@@ -316,7 +316,7 @@ void setup_display(void) {
 
   display.setTextSize(1);
   display.setTextColor(BLACK);
-  display.setCursor(0,0);
+  display.setCursor(0, 0);
   display.println("Hello, world!");
   display.display();
   delay(2000);
@@ -421,7 +421,35 @@ void itoa2(int num, char *s, int base = 10) {
 }
 bool gps_active = false;
 
-void display_gps_status(int x, int y) {
+long int secs_since_sync = 0;
+const long int settle_time_since_sync = 20;  // wait this long before tracking difference in ppb. 
+
+void draw_ppb(int x, int y, bool break_line=false) {
+  // Print the PPB to the current text cursor position.
+  // Figure PPB
+  // if long int is 32 bit, then largest value is ~2e9, so numerator will overflow
+  // when skew_us is 2e4 or 20 ms.
+  if (secs_since_sync > settle_time_since_sync) {
+    char s[12];
+    long int ppb_times_100 = (100000L * (skew_us - initial_skew_us)) / (secs_since_sync - settle_time_since_sync);
+    display.setCursor(x * CHAR_W, y * ROW_H);
+    display.print("ppb: ");
+    if (break_line)
+        display.setCursor(x * CHAR_W, (y + 1) * ROW_H);
+    if (ppb_times_100 < 0) {
+      display.print("-");
+      ppb_times_100 = -ppb_times_100;
+    }
+    itoa(ppb_times_100 / 100, s, 10);
+    display.print(s);
+    display.print(".");
+    itoa2(ppb_times_100 % 100, s);
+    s[2] = '\0';
+    display.print(s);
+  }
+}
+
+void display_gps_status(int x, int y, bool include_ppb=false) {
   // GPS status
   display.setFont();
   display.setCursor(x * CHAR_W, y * ROW_H);
@@ -435,6 +463,8 @@ void display_gps_status(int x, int y) {
     display.drawLine(x * CHAR_W - 1, y * ROW_H, x * CHAR_W - 1, (y + 1) * ROW_H - 1, BLACK);
   }
   display_skew_us(skew_us, x, y + 1);
+  if (include_ppb)
+    draw_ppb(x, y + 3, /*break_line=*/true);
 }
 
 void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool display_detail) {
@@ -541,7 +571,7 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool displ
     display.print("GPSSync: ");
     char *sp = s;
     if (last_gps_sync_unixtime > 0) {
-      long int secs_since_sync = ds3231.now().unixtime() - last_gps_sync_unixtime;
+      secs_since_sync = ds3231.now().unixtime() - last_gps_sync_unixtime;
       TimeSpan since_sync = TimeSpan(secs_since_sync);
       itoa(since_sync.days(), sp, 10);
       sp += strlen(sp);
@@ -557,47 +587,30 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool displ
       sp += 2;
       *sp = '\0';
       display.print(s);
-
-      // Figure PPB
-      // if long int is 32 bit, then largest value is ~2e9, so numerator will overflow
-      // when skew_us is 2e4 or 20 ms.
-      if (secs_since_sync < 10) initial_skew_us = skew_us;
-      long int ppb_times_100 = (100000L * (skew_us - initial_skew_us)) / secs_since_sync;
-      display.setCursor(0, 5 * ROW_H);
-      display.print("ppb: ");
-      if (ppb_times_100 < 0)  {
-        display.print("-");
-        ppb_times_100 = -ppb_times_100;
-      }
-      itoa(ppb_times_100 / 100, s, 10);
-      display.print(s);
-      display.print(".");
-      itoa2(ppb_times_100 % 100, s);
-      s[2] = '\0';
-      display.print(s);
-      
+      if (secs_since_sync < settle_time_since_sync) initial_skew_us = skew_us;
+      draw_ppb(0, 5);
     } else {
       display.print("none");
     }
-    
+
     display.setCursor(0, 6 * ROW_H);
     display.print("GPSUp: ");
     if (!last_gps_uptime.secondstime()) {
-        strcpy(s, "none");
+      strcpy(s, "none");
     } else {
-        strcpy(s, "MM-DD hh:mm:ss");
-        last_gps_uptime.toString(s);
-    }    
+      strcpy(s, "MM-DD hh:mm:ss");
+      last_gps_uptime.toString(s);
+    }
     display.print(s);
-    
+
     display.setCursor(0, 7 * ROW_H);
     display.print("GPSDn: ");
     if (!last_gps_downtime.secondstime()) {
-        strcpy(s, "none");
+      strcpy(s, "none");
     } else {
-        strcpy(s, "MM-DD hh:mm:ss");
-        last_gps_downtime.toString(s);
-    }    
+      strcpy(s, "MM-DD hh:mm:ss");
+      last_gps_downtime.toString(s);
+    }
     display.print(s);
   }
 
@@ -680,7 +693,7 @@ void display_skew_us(long int skew_microseconds, int x, int y) {
 #define DS3231_CONTROL 0x0E         ///< Control register
 #define DS3231_STATUSREG 0x0F       ///< Status register
 #define DS3231_AGING 0x10           ///< Aging offset register
-#define DS3231_TEMPERATUREREG 0x11  ///< Temperature register (high byte - low byte is at 0x12), 10-bit
+#define DS3231_TEMPERATUREREG 0x11  ///< Temperature register (high byte - low byte is at 0x12), 10-bit \
                                     ///< temperature value
 
 #define time_t uint32_t
@@ -974,10 +987,10 @@ void setup_dac(void) {
 bool serial_available = false;
 
 const int SECS_PER_DAY = 24 * 60 * 60;
-const int LOG_DATA_LEN = 120;     // One value per pixel, roughly.
-const int LOG_INTERVAL_SECS = 1 * 60;  // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const int LOG_DATA_LEN = 120;                            // One value per pixel, roughly.
+const int LOG_INTERVAL_SECS = 1 * 60;                    // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
 const int LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
-const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);  // Where the vertical lines occur
+const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
 
 int log_data[LOG_DATA_LEN];
 time_t log_times[LOG_DATA_LEN];
@@ -1028,8 +1041,8 @@ void update_most_recent_data(int new_data) {
 void push_data(int new_data, time_t new_time) {
   // Move forward data
   if (serial_available) {
-     Serial.print("new_data: ");
-     Serial.println(new_data);
+    Serial.print("new_data: ");
+    Serial.println(new_data);
   }
   for (int i = 0; i < LOG_DATA_LEN - 1; ++i) {
     log_data[i] = log_data[i + 1];
@@ -1045,8 +1058,8 @@ time_t last_log_time = 0;
 
 void update_logger(int data_val, time_t data_time) {
   // Defer recording first point until we're on an integral multiple of the log interval.
-  if (last_log_time == 0 && (data_time % LOG_INTERVAL_SECS) != 0)  return;
-  if ( (data_time - last_log_time + LOG_MAX_TIME_PERIOD_SECS) % LOG_MAX_TIME_PERIOD_SECS >= LOG_INTERVAL_SECS) {
+  if (last_log_time == 0 && (data_time % LOG_INTERVAL_SECS) != 0) return;
+  if ((data_time - last_log_time + LOG_MAX_TIME_PERIOD_SECS) % LOG_MAX_TIME_PERIOD_SECS >= LOG_INTERVAL_SECS) {
     // Time to log a new value.
     last_log_time = data_time;
     // Record new temperature every minute.
@@ -1085,8 +1098,8 @@ const int8_t secs_height = 8;
 #include <Fonts/HD44780.h>
 #define SMALLFONT &FreeSans12pt7b
 #define MICROFONT &HD44780
-#define MICROFONT_H  (8)
-#define MICROFONT_W  (6)
+#define MICROFONT_H (8)
+#define MICROFONT_W (6)
 #define CalBlk36 &CalBlk3612pt7b
 #endif
 #if SCREEN_HEIGHT == 64
@@ -1119,8 +1132,8 @@ uint16_t date_width = 0;
 const char *datefmt = "DDD YYYY-MM-DD";
 
 // 565 RGB 16-bit colors
-int fgcolor = WHITE; // ST77XX_WHITE;
-int bgcolor = BLACK; // Bright blueish-green // ST77XX_BLACK;
+int fgcolor = WHITE;  // ST77XX_WHITE;
+int bgcolor = BLACK;  // Bright blueish-green // ST77XX_BLACK;
 
 enum text_alignment {
   TOP,
@@ -1131,16 +1144,22 @@ enum text_alignment {
 };
 
 void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y_align = MIDDLE,
-                int16_t clear_width=0, int16_t clear_height=0, bool debug=false, int16_t font_hshift=0) {
+                int16_t clear_width = 0, int16_t clear_height = 0, bool debug = false, int16_t font_hshift = 0) {
   int16_t x1, y1;
   uint16_t w, h;
   display.getTextBounds(s, x, y, &x1, &y1, &w, &h);
   y1 = y;
   x1 = x;
-  if (x_align == MIDDLE) {x1 -= w / 2;}
-  else if (x_align == RIGHT) {x1 -= w;}
-  if (y_align == MIDDLE) {y1 += h / 2;}
-  else if (y_align == TOP) {y1 += h;}
+  if (x_align == MIDDLE) {
+    x1 -= w / 2;
+  } else if (x_align == RIGHT) {
+    x1 -= w;
+  }
+  if (y_align == MIDDLE) {
+    y1 += h / 2;
+  } else if (y_align == TOP) {
+    y1 += h;
+  }
   if (clear_width) {
     if (x_align == RIGHT) {
       // If clear_width != w, make the right edges line up (not the left).
@@ -1159,7 +1178,7 @@ void print_text(char *s, int16_t x, int16_t y, int8_t x_align = MIDDLE, int8_t y
 void setup_logger_display(void) {
   display.setFont(CalBlk36);
   //display.setTextSize(2);
-  int16_t  x1, y1;
+  int16_t x1, y1;
   uint16_t w, h;
   display.getTextBounds(":", (int16_t)0, (int16_t)0, &x1, &y1, &big_colon_width, &big_colon_height);
   big_colon_width += 1;
@@ -1183,7 +1202,7 @@ void setup_logger_display(void) {
     Serial.println(F("Initialized"));
   } else {
     display.setCursor(SCREEN_WIDTH - MICROFONT_W, MICROFONT_H);
-    display.print("#");    
+    display.print("#");
   }
 
 #ifdef DISPLAY_DISPLAY_CMD
@@ -1191,15 +1210,13 @@ void setup_logger_display(void) {
 #endif
 }
 
-char *sprint_int2(char *s, uint8_t n)
-{  // Always 2 digits, assume n nonnegative, < 99.
+char *sprint_int2(char *s, uint8_t n) {  // Always 2 digits, assume n nonnegative, < 99.
   *s++ = '0' + (n / 10);
   *s++ = '0' + (n % 10);
   return s;
 }
 
-char *sprint_int(char *s, int n, int decimal_place=0)
-{ // Print a signed int as may places as needed. 
+char *sprint_int(char *s, int n, int decimal_place = 0) {  // Print a signed int as may places as needed.
   // returns next char* to write to string.
   // If decimal place > 0, assumed passed int is value * 10**decimal_place
   // and print a decimal place.
@@ -1208,7 +1225,7 @@ char *sprint_int(char *s, int n, int decimal_place=0)
     n = -n;
   }
   if (n > 9 || decimal_place > 0) {
-     s = sprint_int(s, n / 10, decimal_place - 1);
+    s = sprint_int(s, n / 10, decimal_place - 1);
   }
   if (decimal_place == 1) {
     *s++ = '.';
@@ -1218,14 +1235,14 @@ char *sprint_int(char *s, int n, int decimal_place=0)
 }
 
 int y_offset_per_data(int data_y, int mid_y) {
-    if (data_y >= mid_y) {
+  if (data_y >= mid_y) {
     return -1;  // Line is in lower half; label above final point.
   } else {
-    return 1 + MICROFONT_H;   // Line is in upper half; label below final point.
+    return 1 + MICROFONT_H;  // Line is in upper half; label below final point.
   }
 }
 
-void draw_time(int x, int y, int day_mins, bool show_minutes=true) {
+void draw_time_of_day(int x, int y, int day_mins, bool show_minutes = true) {
   // Plot a time as HH:MM (or just HH if not show_minutes) using tiny font.
   // x, y is bottom-left
   char str[3];
@@ -1235,7 +1252,7 @@ void draw_time(int x, int y, int day_mins, bool show_minutes=true) {
   if (show_minutes) {
     *(sprint_int2(str, day_mins % 60)) = '\0';
     display.setCursor(x + 2 * MICROFONT_W + 2, y);
-    display.print(str);   // Over by 2 chr + 2 px for colon.
+    display.print(str);  // Over by 2 chr + 2 px for colon.
     // Add colon.
     display.fillRect(x + 2 * MICROFONT_W, y - 3, 1, 1, fgcolor);
     display.fillRect(x + 2 * MICROFONT_W, y - 1, 1, 1, fgcolor);
@@ -1248,7 +1265,7 @@ void draw_log_output(int x, int y, int w, int h) {
   //display.setTextSize(1);
   // Figure scaling
   display.setFont(MICROFONT);
-  const int legend_w = 3 * MICROFONT_W; // for legends up to 3 digits.
+  const int legend_w = 3 * MICROFONT_W;  // for legends up to 3 digits.
   uint8_t data_x = x + legend_w;
   uint8_t data_w = w - legend_w;
   int data_scale = (h - 1) * 256 / (data_max - data_min);
@@ -1270,7 +1287,7 @@ void draw_log_output(int x, int y, int w, int h) {
         display.drawLine(last_x, last_y, new_x, new_y, fgcolor);
       }
       // Add vertical lines every 6h transition.
-      int subdiv = localtime  / SUBDIV_SECS;
+      int subdiv = localtime / SUBDIV_SECS;
       if (subdiv != last_subdiv) {
         if (last_subdiv >= 0) {
           display.drawLine(new_x, y, new_x, y + h, fgcolor);
@@ -1278,7 +1295,9 @@ void draw_log_output(int x, int y, int w, int h) {
           int vert_line_legend_x = new_x - (2 * MICROFONT_W);
           // Don't draw if it's going to splay off the left.
           if (vert_line_legend_x >= data_x) {
-            draw_time(vert_line_legend_x, y - 1 + MICROFONT_H, ((subdiv * SUBDIV_SECS) % SECS_PER_DAY) / 60, /* show_minutes= */ false);
+            int legend_time_of_day_in_mins = ((subdiv * SUBDIV_SECS) % SECS_PER_DAY) / 60;
+            draw_time_of_day(vert_line_legend_x, y - 1 + MICROFONT_H, legend_time_of_day_in_mins, 
+                      /* show_minutes= */ (legend_time_of_day_in_mins % 60) != 0);
           }
         }
         last_subdiv = subdiv;
@@ -1304,7 +1323,7 @@ void draw_log_output(int x, int y, int w, int h) {
     // Only draw first_time if it doesn't impinge on legend at left.
     int first_time_x = first_x - (4 * MICROFONT_W + 1);
     if (first_time_x >= data_x) {
-      draw_time(first_time_x, first_y + y_offset, first_time_mins);
+      draw_time_of_day(first_time_x, first_y + y_offset, first_time_mins);
     }
     // Label current value.
     y_offset = y_offset_per_data(last_y, mid_y);
@@ -1327,7 +1346,7 @@ uint8_t colon_visible = true;
 
 char dow_names[] = "SunMonTueWedThuFriSat";
 
-void sprint_date(class DateTime& dt, char* datestr) {
+void sprint_date(class DateTime &dt, char *datestr) {
   // Fake dt.toString for our format.  Pad each end with spaces to get proper clearing of previous.
   int dow = dt.dayOfTheWeek() % 7;
   char *s = datestr;
@@ -1340,7 +1359,7 @@ void sprint_date(class DateTime& dt, char* datestr) {
   *s++ = '-';
   s = sprint_int2(s, dt.month());
   *s++ = '-';
-  s = sprint_int2(s, dt.day()); 
+  s = sprint_int2(s, dt.day());
   *s++ = ' ';
   *s++ = '\0';
 }
@@ -1351,7 +1370,7 @@ void sprint_date(class DateTime& dt, char* datestr) {
 //TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
 //Timezone myTZ(myDST, mySTD);
 
-int logger_display(time_t t, uint8_t redraw=false) {
+int logger_display(time_t t, uint8_t redraw = false) {
   // Returns minutes within day (0..1440).
   //u8g2.clearBuffer();   // for _F_ initializer only
   //display.fillScreen(bgcolor);
@@ -1372,14 +1391,14 @@ int logger_display(time_t t, uint8_t redraw=false) {
     char datestr[24];
     strcpy(datestr, datefmt);
     //dt.toString(datestr);
-    sprint_date(dt, datestr);    
+    sprint_date(dt, datestr);
     // Date.
     display.setFont(SMALLFONT);
-    int16_t  x1, y1;
+    int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(datestr, (int16_t)0, (int16_t)0, &x1, &y1, &w, &h);
-    //display.drawRect(mid_x - w/2 - 8, date_midline_y - h/2 - 1, w + 16, h + 2, fgcolor);      
-    print_text(datestr, mid_x - w/2, date_midline_y - h / 2 - 1, LEFT, TOP, w + 16, h, true);
+    //display.drawRect(mid_x - w/2 - 8, date_midline_y - h/2 - 1, w + 16, h + 2, fgcolor);
+    print_text(datestr, mid_x - w / 2, date_midline_y - h / 2 - 1, LEFT, TOP, w + 16, h, true);
     //print_text(datestr, 0, 0, LEFT, TOP, w + 16, h, true);
   }
 
@@ -1430,15 +1449,15 @@ int logger_display(time_t t, uint8_t redraw=false) {
       last_hour = dt.hour();
       sprint_int2(digit_string, dt.hour());
       digit_string[2] = '\0';
-      print_text(digit_string, mid_x - (big_colon_width/2) - 3, time_midline_y, 
-                RIGHT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
+      print_text(digit_string, mid_x - (big_colon_width / 2) - 3, time_midline_y,
+                 RIGHT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
     }
     if (colon_visible) {
       // We're still in CalBlk36 mode.
       print_text((char *)":", mid_x, time_midline_y + digits_baseline_shift);
     } else {
       display.fillRect(mid_x - 1 - 4, time_midline_y - (big_colon_height >> 1) - 4,
-                  big_colon_width, big_colon_height, bgcolor);
+                       big_colon_width, big_colon_height, bgcolor);
     }
   }
   if (redraw || dt.minute() != last_minute) {
@@ -1446,13 +1465,13 @@ int logger_display(time_t t, uint8_t redraw=false) {
     last_minute = dt.minute();
     sprint_int2(digit_string, dt.minute());
     digit_string[2] = '\0';
-    print_text(digit_string, mid_x + (big_colon_width/2) + 2, time_midline_y,
+    print_text(digit_string, mid_x + (big_colon_width / 2) + 2, time_midline_y,
                LEFT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
     // Update log when minutes change.
     draw_log_output(log_x, log_y, log_w, log_h);
   }
 
-  display_gps_status(22, 0);
+  display_gps_status(22, 0, /*include_ppb=*/true);
 
 #ifdef DISPLAY_DISPLAY_CMD
   display.display();
@@ -1468,11 +1487,11 @@ static int display_mode = 0;
 
 void update_display(void) {
   if (display_mode == 0) {
-    ds3231_display(ds3231, "unused", /*display_detail= */true);
+    ds3231_display(ds3231, "unused", /*display_detail= */ true);
   } else if (display_mode == 1) {
-    ds3231_display(ds3231, "unused", /* display_detail= */false);
+    ds3231_display(ds3231, "unused", /* display_detail= */ false);
   } else {
-    logger_display(ds3231.now().unixtime(), /* redraw= */true);
+    logger_display(ds3231.now().unixtime(), /* redraw= */ true);
   }
 }
 
@@ -1787,7 +1806,7 @@ void handle_cmd(char cmd, char *arg) {
       // Enable/disable continuous polling of time across I2C.
       if (alen) {
         polling_interval = atoi(arg);
-        if (polling_interval < 0)  polling_interval = 0;
+        if (polling_interval < 0) polling_interval = 0;
       }
       Serial.print("Polling interval (ms, 0=disabled)=");
       Serial.println(polling_interval);
@@ -1837,7 +1856,7 @@ void handle_cmd(char cmd, char *arg) {
 
     case 'V':
       // Predelay for GPS sync in us.  Larger = set clock earlier.
-      if(alen) {
+      if (alen) {
         predelay_trim_us = atoi(arg);
       }
       Serial.print("Predelay us trim=");
@@ -1915,16 +1934,16 @@ void cmd_update(void) {
 //   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
 //   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
 #ifdef MY_PICO_RP2040
-  #ifdef MY_PICO_RP2040_LCD
-    const int ppsPin = 6;  // PPS output from GPS board
-    #warning "pps pin GP6"
-  #else
-    const int ppsPin = 8;  // PPS output from GPS board
-    #warning "pps pin GP8"
-  #endif
+#ifdef MY_PICO_RP2040_LCD
+const int ppsPin = 6;  // PPS output from GPS board
+#warning "pps pin GP6"
 #else
-  const int ppsPin = A2;  // PPS output from GPS board
-  #warning "pps pin A2"
+const int ppsPin = 8;  // PPS output from GPS board
+#warning "pps pin GP8"
+#endif
+#else
+const int ppsPin = A2;  // PPS output from GPS board
+#warning "pps pin A2"
 #endif
 
 volatile unsigned long gps_micros = 0;
@@ -2055,14 +2074,14 @@ void sync_time_from_GPS(void) {
 void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040
 #ifdef MY_PICO_RP2040
-  // Configure Pico UART2
-  #ifdef MY_PICO_RP2040_LCD
-    SerialGPS.setTX(8);
-    SerialGPS.setRX(9);
-  #else
-    SerialGPS.setTX(4);
-    SerialGPS.setRX(5);
-  #endif
+// Configure Pico UART2
+#ifdef MY_PICO_RP2040_LCD
+  SerialGPS.setTX(8);
+  SerialGPS.setRX(9);
+#else
+  SerialGPS.setTX(4);
+  SerialGPS.setRX(5);
+#endif
 #else
   SerialGPS.setRX(1);
   SerialGPS.setTX(0);
@@ -2112,8 +2131,7 @@ void update_GPS(void) {
     if (!gps_active && gps_time_valid(gps)) {
       Serial.println("GPS transition to true");
       record_GPS_uptime = true;
-      if (set_time_on_gps_sync &&
-          abs((long)(gps_unixtime() - ds3231_unixtime())) > MAX_DRIFT_SECS_BEFORE_GPS_RESYNC) {
+      if (set_time_on_gps_sync && abs((long)(gps_unixtime() - ds3231_unixtime())) > MAX_DRIFT_SECS_BEFORE_GPS_RESYNC) {
         // We're transitioning to GPS active, and we enabled auto-sync when GPS comes on
         // if the clock time is significantly different from GPS time.
         Serial.println("request GPS resync");
@@ -2123,7 +2141,7 @@ void update_GPS(void) {
     }
   } else {
     // More than 2 sec since last GPS time reported.
-    if (gps_active)  last_gps_downtime = ds3231.now();
+    if (gps_active) last_gps_downtime = ds3231.now();
     gps_active = false;
   }
 }
@@ -2203,11 +2221,11 @@ const char *clock_name = "10M";
 // Where the frequency to count is coming in.
 // On RP2040, must be odd-numbered (PWM Chan B) pin to use PWM freq counter.
 #ifdef MY_PICO_RP2040
-  int timer_tenMHzInputPin = 7;   // MUST BE ODD for RP2040
-  #warning "10MHz input on GP7"
+int timer_tenMHzInputPin = 7;  // MUST BE ODD for RP2040
+#warning "10MHz input on GP7"
 #else  // FEATHER_RP2040
-  int timer_tenMHzInputPin = 11;  // MUST BE ODD for RP2040
-  #warning "10MHz input on GP11"
+int timer_tenMHzInputPin = 11;  // MUST BE ODD for RP2040
+#warning "10MHz input on GP11"
 #endif
 
 uint8_t timer_sliceNum = 0;
@@ -2396,8 +2414,8 @@ void timer_reset_sync(void) {
   pcnt_counter_resume(PCNT_UNIT);
 }
 
-#endif // ESP32
-#endif // !RP2040
+#endif  // ESP32
+#endif  // !RP2040
 
 #else  // internal clocking.
 
@@ -2459,12 +2477,12 @@ void temperature_setup(void) {
 
 int temperature_get(void) {
   // Return current temperature in quarter-Cs.
-  // Temp sensor V_be is nominally 0.706 v at 27 degC 
+  // Temp sensor V_be is nominally 0.706 v at 27 degC
   // with a slope of -1.721 mV/deg.
   // temp_quarter-Cs = 4 * (27 - ((3.3 * adc_read() / 4096) - 0.706) / 0.001721)
   //                 = 4 * (27 - (0.468 * adc_read() - 410.22))
   //                 = 4 * (437.22 - 0.468 * adc_read())
-  //                 = 
+  //                 =
   //  = 108 - (13.2 / 4096 * adc_read() * 581 + 4*410
   //  = 1748.9 - 1.872 * adc_read()
   //  =/= 1749 - (15/8) * adc_read()
@@ -2478,16 +2496,16 @@ int temperature_get(void) {
 
 #ifdef ESP32
 // EPS32 onboard temp sensor
-// See 
+// See
 // https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/temp_sensor.html
 
 //#include "driver/temperature_sensor.h"
 
 void temperature_setup(void) {
-    //temperature_sensor_handle_t temp_sensor = NULL;
-    //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
-    //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
-    //temperature_sensor_enable(temp_sensor);
+  //temperature_sensor_handle_t temp_sensor = NULL;
+  //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+  //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
+  //temperature_sensor_enable(temp_sensor);
 }
 
 // Copied from esp32.../esp32-hal.h, undocumented??  Returns C.
@@ -2495,10 +2513,10 @@ float temperatureRead();
 
 int temperature_get(void) {
   // Return current temperature in quarter-Cs.
-    float tsens_value;
-    //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
-    tsens_value = temperatureRead();
-    return (int)(round( 4 * tsens_value));
+  float tsens_value;
+  //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
+  tsens_value = temperatureRead();
+  return (int)(round(4 * tsens_value));
 }
 
 #else  // !ESP32
@@ -2510,22 +2528,28 @@ void temperature_setup(void) {
 int temperature_get(void) {
   // Return current temperature in quarter-Cs.
   // dummy.
-  return (4* 25);
+  return (4 * 25);
 }
 
-#endif               // !ESP32
-#endif               // !RP2040
+#endif  // !ESP32
+#endif  // !RP2040
 
 // ----- DS3231 emulation -----
 //#include "RTClib.h"  // For DateTime etc.
-static uint8_t bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
-static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
-static uint8_t dowToDS3231(uint8_t d) { return d == 0 ? 7 : d; }
+static uint8_t bcd2bin(uint8_t val) {
+  return val - 6 * (val >> 4);
+}
+static uint8_t bin2bcd(uint8_t val) {
+  return val + 6 * (val / 10);
+}
+static uint8_t dowToDS3231(uint8_t d) {
+  return d == 0 ? 7 : d;
+}
 
 // Space for registers.
 #define NUM_REGISTERS 19
 // Double-buffers to allow immediate register updates.
-uint8_t registers0[NUM_REGISTERS + 1];    // 20th address holds target state of SQWV output
+uint8_t registers0[NUM_REGISTERS + 1];  // 20th address holds target state of SQWV output
 uint8_t registers1[NUM_REGISTERS + 1];
 // Current register set.
 uint8_t *registers = registers0;
@@ -2534,16 +2558,16 @@ uint8_t *registers_next = registers1;
 class DateTime decode_time_from_regs(uint8_t *buffer) {
   // Convert ds3231 time registers to Unix time.
   // Just like reading from the chip in RTClib_DS3231.cpp.
- return DateTime(bcd2bin(buffer[6]) + 2000U, bcd2bin(buffer[5] & 0x7F),
-                 bcd2bin(buffer[4]), bcd2bin(buffer[2]), bcd2bin(buffer[1]),
-                 bcd2bin(buffer[0] & 0x7F));
+  return DateTime(bcd2bin(buffer[6]) + 2000U, bcd2bin(buffer[5] & 0x7F),
+                  bcd2bin(buffer[4]), bcd2bin(buffer[2]), bcd2bin(buffer[1]),
+                  bcd2bin(buffer[0] & 0x7F));
 }
 
 time_t ds3231_unixtime(void) {
   return decode_time_from_regs(registers).unixtime();
 }
 
-void encode_time_to_regs(const DateTime& dt, uint8_t *buffer) {
+void encode_time_to_regs(const DateTime &dt, uint8_t *buffer) {
   // Write a date/time back into the emulated ds3231 time registers.
   // Just like setting a new time to the chip in RTClib_DS3231.cpp.
   buffer[0] = bin2bcd(dt.second());
@@ -2564,7 +2588,7 @@ void ds3231_setup() {
   encode_time_to_regs(DateTime(2000, 1, 1, 0, 0, 0), registers);
   // Initialize temperature to something plausible, 25.0 C
   registers[DS3231_TEMPERATUREREG] = 25;
-  
+
   // Copy to 2nd registers.
   for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
     registers_next[i] = registers[i];
@@ -2580,9 +2604,9 @@ class DateTime decode_alarm(uint8_t *buffer, uint8_t alarm_num, uint8_t *p_alarm
     buffer += DS3231_ALARM1;  // Base of alarm1 data.
     seconds = bcd2bin(buffer[0] & 0x7F);
     alarm_mode_bits = (buffer[0] & 0x80) >> 7;
-  } else { // Alarm 2
+  } else {                        // Alarm 2
     buffer += DS3231_ALARM2 - 1;  // Base of alarm2, less 1 to leave "space" for seconds..
-    seconds = 0;   // But alarm2 seccond are implicitly zero.
+    seconds = 0;                  // But alarm2 seccond are implicitly zero.
   }
   uint8_t minutes = bcd2bin(buffer[1] & 0x7F);
   alarm_mode_bits |= (buffer[1] & 0x80) >> 6;
@@ -2657,23 +2681,23 @@ void ds3231_delta_aging(int delta) {
 
 #define CHECK_BIT(reg, bit) (reg & _BV(bit))
 
-void ds3231_tick(uint8_t *registers, uint8_t advance=1) {
+void ds3231_tick(uint8_t *registers, uint8_t advance = 1) {
   // Add one second (by default) to the internal clock.
   // We also allow advance=0 to simply recalculate state (alarm outputs) without advancing clock.
   uint32_t time = decode_time_from_regs(registers).unixtime();
   time += advance;
   DateTime now(time);
   encode_time_to_regs(now, registers);
-  
+
   // Check for alarm conditions.
   uint8_t alarm1_mode;
-  DateTime alarm1_time = decode_alarm(registers, /* alarm */1, &alarm1_mode);
+  DateTime alarm1_time = decode_alarm(registers, /* alarm */ 1, &alarm1_mode);
   if (check_alarm_match(now, alarm1_time, alarm1_mode)) {
     registers[DS3231_STATUSREG] |= _BV(DS3231_S_A1F);
   }
 
   uint8_t alarm2_mode;
-  DateTime alarm2_time = decode_alarm(registers, /* alarm */2, &alarm2_mode);
+  DateTime alarm2_time = decode_alarm(registers, /* alarm */ 2, &alarm2_mode);
   if (check_alarm_match(now, alarm2_time, alarm2_mode)) {
     registers[DS3231_STATUSREG] |= _BV(DS3231_S_A2F);
   }
@@ -2696,13 +2720,13 @@ void ds3231_tick(uint8_t *registers, uint8_t advance=1) {
   registers[DS3231_TEMPERATUREREG] = (quantized_temp >> 2);
   // Fractional degrees
   registers[DS3231_TEMPERATUREREG + 1] = (quantized_temp & 3) << 6;
-  
+
   // Update the trim by ?1 ppb per aging offset.  Positive aging offset makes clock slower.
   // Maybe we should only do this when it is changed, i.e. check writes to AGING register?
   timer_update_trim_ppb(1 * (int)((int8_t)registers[DS3231_AGING]));
 }
 
-void ds3231_setup_next_tick(int advance=1) {
+void ds3231_setup_next_tick(int advance = 1) {
   // Setup registers_next to be correct for the next tick event.
   // First, copy current registers to registers_next:
   for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
@@ -2714,7 +2738,7 @@ void ds3231_setup_next_tick(int advance=1) {
 
 void ds3231_registers_updated(bool seconds_modified) {
   // Notification that the registers were modified externally (e.g. by I2C write).
-  // Behavior varies depending on whether seconds were set, in which case the 
+  // Behavior varies depending on whether seconds were set, in which case the
   // ticking changes phase.
   // In other situation, let the seconds advance at the next tick.
   ds3231_setup_next_tick(/* advance= */ seconds_modified ? 0 : 1);
@@ -2761,15 +2785,15 @@ void clock_tick(void) {
 }
 
 void print_gps_skew(void) {
-    if (!gps_active) {
-      Serial.println("GPS not active.");
-      Serial.print("GPS micros=");
-      Serial.println(gps_micros);
-    } else {
-      Serial.print("RTC - GPS microseconds=");
-      Serial.println((long int)(tick_micros - gps_micros));
-    }
+  if (!gps_active) {
+    Serial.println("GPS not active.");
+    Serial.print("GPS micros=");
+    Serial.println(gps_micros);
+  } else {
+    Serial.print("RTC - GPS microseconds=");
+    Serial.println((long int)(tick_micros - gps_micros));
   }
+}
 
 // ------------- Display sleep (screensaver) -----------
 
@@ -2804,7 +2828,7 @@ uint32_t millis_last_action = 0;
 void sleep_update(void) {
   // Check the time and sleep display if we've been idle.
   // We use millis since ds3231 time may be changing.
-  if (millis_last_action && display_sleep_timeout_secs 
+  if (millis_last_action && display_sleep_timeout_secs
       && (millis() - millis_last_action) > 1000 * display_sleep_timeout_secs) {
     if (display_on) {
       sleep_display();
@@ -2829,20 +2853,20 @@ void sleep_tickle(void) {
 #define NUM_BUTTONS 3  // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
 #ifdef ARDUINO_ARCH_RP2040
 #ifdef FEATHER_RP2040  // i.e., this is a Feather RP2040
-    int button_pins[NUM_BUTTONS] = {9, 8, 7};
+int button_pins[NUM_BUTTONS] = { 9, 8, 7 };
 #warning "Feather RP2040"
 #else  // RP2040 Pico
-  #ifdef MY_PICO_RP2040_LCD
-    int button_pins[NUM_BUTTONS] = {20, 21, 22};
-  #else
-    int button_pins[NUM_BUTTONS] = {18, 19, 20};
-  #endif
+#ifdef MY_PICO_RP2040_LCD
+int button_pins[NUM_BUTTONS] = { 20, 21, 22 };
+#else
+int button_pins[NUM_BUTTONS] = { 18, 19, 20 };
+#endif
 #endif
 #else
-  int button_pins[NUM_BUTTONS] = {9, 6, 5};
+int button_pins[NUM_BUTTONS] = { 9, 6, 5 };
 #endif
-int button_state[NUM_BUTTONS] = {0, 0, 0};
-unsigned long button_last_change_time[NUM_BUTTONS] = {0, 0, 0};
+int button_state[NUM_BUTTONS] = { 0, 0, 0 };
+unsigned long button_last_change_time[NUM_BUTTONS] = { 0, 0, 0 };
 // For distinguishing short/long press
 int button_down_time = 0;
 
@@ -2896,7 +2920,7 @@ void buttons_update(void) {
       return;
     }
     sleep_tickle();
-    switch(button) {
+    switch (button) {
       case 0:
         if (long_press) {
           sleep_display();
@@ -2965,32 +2989,32 @@ void requestEvent() {
   // I *think* I2C indicates how many bytes it wants by sending a STOP after it's had enough.
   // but this doesn't appear to be visible through Wire.
   // So we send everything, and count on any excess being dropped.
-  
+
   // It's critical that cursor has been set (via a preceding receiveEvent) before this runs.
   // The stock DS3231_RTC used i2c_dev->write_then_read, which (on the ESP32) actually ended
   // up not servicing the receive event until *after* the output buffer had been stuffed, so
   // the cursor was always one transaction behind (works OK on RP2040 Pico).
   // Modifying it to use write() followed by read() fixed it on ESP32.
-  
+
   EXT_I2C.write(registers + cursor, NUM_REGISTERS - cursor);
 }
 
 
 // ------ emu_exp-specific read and write functions ------
 
-void read_registers_fn(uint8_t reg, uint8_t* buffer, uint8_t num) {
+void read_registers_fn(uint8_t reg, uint8_t *buffer, uint8_t num) {
   for (int i = 0; i < num; ++i) {
     buffer[i] = registers[reg + i];
   }
 }
 
-void write_registers_fn(uint8_t reg, const uint8_t* buffer, uint8_t num) {
+void write_registers_fn(uint8_t reg, const uint8_t *buffer, uint8_t num) {
   for (int i = 0; i < num; ++i) {
     registers[reg + i] = buffer[i];
   }
   bool seconds_modified = (reg == 0 && num > 0);
   // Maybe act on the new register values.
-  ds3231_registers_updated(seconds_modified);  
+  ds3231_registers_updated(seconds_modified);
 }
 
 
@@ -2998,7 +3022,7 @@ void write_registers_fn(uint8_t reg, const uint8_t* buffer, uint8_t num) {
 
 #define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
 //bool serial_available = false;
-void open_serial(int baudrate=9600) {
+void open_serial(int baudrate = 9600) {
   Serial.begin(baudrate);
   // Wait for Serial port to open
   int i = 0;
@@ -3013,8 +3037,7 @@ void open_serial(int baudrate=9600) {
   delay(1000);
 }
 
-void setup()
-{
+void setup() {
 #ifdef ARDUINO_ARCH_RP2040
   // Configure Pico RP2040 I2C
   // Internal I2C is used to communicate with I2C peripherals.
@@ -3086,7 +3109,6 @@ void setup()
 
   // Seems likke this doesn't take when we do it inside setup_display, try again now.
   set_backlight(backlight_brightness);
-
 }
 
 int last_sec = 0;
@@ -3096,7 +3118,7 @@ time_t secs_last_change = 0;
 uint32_t raw_tick_count = 0;
 
 void loop() {
-  
+
   // Emulator loop
 
   uint32_t now_millis = millis();
@@ -3109,7 +3131,7 @@ void loop() {
 #endif
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
     // Half way through second is also when we calculate and show the skew
-    if(gps_active) {
+    if (gps_active) {
       // POSITIVE skew_us means XO tick is LATE relative to GPS; if it's getting LATER, XO needs to get FASTER to fix.
       skew_us = (long int)(tick_micros - gps_micros);
       //display_skew_us(skew_us);
@@ -3136,7 +3158,7 @@ void loop() {
   }
 
   // Explorer loop
-  
+
   cmd_update();
   buttons_update();
 
@@ -3147,12 +3169,12 @@ void loop() {
     if (now_sec != last_sec) {
       last_sec = now_sec;
       //update_display(dt);
-      if(display_on) {
+      if (display_on) {
         update_display();
       }
       //Serial.print("tick - gps=");
       //Serial.println((long int)(tick_micros - gps_micros));
-      if (raw_tick_count > 10)  update_logger((int)(tick_micros - gps_micros), dt.unixtime());
+      if (raw_tick_count > 10) update_logger((int)(tick_micros - gps_micros), dt.unixtime());
     }
   }
 
