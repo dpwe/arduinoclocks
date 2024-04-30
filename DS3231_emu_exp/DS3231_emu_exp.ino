@@ -571,7 +571,6 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool displ
     display.print("GPSSync: ");
     char *sp = s;
     if (last_gps_sync_unixtime > 0) {
-      secs_since_sync = ds3231.now().unixtime() - last_gps_sync_unixtime;
       TimeSpan since_sync = TimeSpan(secs_since_sync);
       itoa(since_sync.days(), sp, 10);
       sp += strlen(sp);
@@ -712,14 +711,16 @@ void serial_print_time(const DateTime &dt) {
   Serial.println(s);
 }
 
+// Predeclare
+time_t ds3231_unixtime(void);
+
 // getExternalTime is declared to expect a function returning a (signed) long int.
 //time_t
 #ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
 long
 #endif
-  long int
-  RTC_utc_get(void) {
-  return ds3231.now().unixtime();
+long int RTC_utc_get(void) {
+  return ds3231_unixtime();
 }
 
 void RTC_set_time(const DateTime &dt) {
@@ -728,7 +729,7 @@ void RTC_set_time(const DateTime &dt) {
   serial_print_time(dt);
   ds3231.adjust(dt);
   // Resync TimeLib
-  //setTime(ds3231.now().unixtime());
+  //setTime(ds3231_unixtime());
 }
 
 // ---- Misc formatting -----
@@ -988,7 +989,7 @@ bool serial_available = false;
 
 const int SECS_PER_DAY = 24 * 60 * 60;
 const int LOG_DATA_LEN = 120;                            // One value per pixel, roughly.
-const int LOG_INTERVAL_SECS = 1 * 60;                    // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const int LOG_INTERVAL_SECS = 4 * 60;                    // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
 const int LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
 const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
 
@@ -1491,7 +1492,7 @@ void update_display(void) {
   } else if (display_mode == 1) {
     ds3231_display(ds3231, "unused", /* display_detail= */ false);
   } else {
-    logger_display(ds3231.now().unixtime(), /* redraw= */ true);
+    logger_display(ds3231_unixtime(), /* redraw= */ true);
   }
 }
 
@@ -2110,10 +2111,10 @@ void setup_GPS(void) {
 }
 
 #define MAX_DRIFT_SECS_BEFORE_GPS_RESYNC 10
-// Predeclare
-time_t ds3231_unixtime(void);
 
 void update_GPS(void) {
+  if (last_gps_sync_unixtime)
+    secs_since_sync = ds3231_unixtime() - last_gps_sync_unixtime;
   if (gps_micros != last_gps_micros) {
     last_gps_micros = gps_micros;
     // Request for sync e.g. from button press.
