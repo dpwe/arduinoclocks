@@ -104,30 +104,30 @@
 #include <RTClib.h>  // Adafruit; defines RTC_DS3231
 
 #ifdef ARDUINO_ARCH_RP2040
-#ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
-#define FEATHER_RP2040
-//#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
-//#define FEATHER_OLED    // Different address than ext OLED.
-#define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
-#else
-#define MY_PICO_RP2040
-#define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
-#endif
-// Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
-// must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
-const int ext_sda_pin = 24;
-const int ext_scl_pin = 25;
-#define EXT_I2C Wire1
-const int int_sda_pin = 2;
-const int int_scl_pin = 3;
-#define INT_I2C Wire
+  #ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
+    #define FEATHER_RP2040
+    //#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+    //#define FEATHER_OLED    // Different address than ext OLED.
+    #define DISPLAY_ST7920    // {128,192}x64 green-yellow LCD matrix
+  #else
+    #define MY_PICO_RP2040
+    #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
+  #endif
+  // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
+  // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
+  const int ext_sda_pin = 24;
+  const int ext_scl_pin = 25;
+  #define EXT_I2C Wire1
+  const int int_sda_pin = 2;
+  const int int_scl_pin = 3;
+  #define INT_I2C Wire
 #else  // ESP32-S3
-const int ext_sda_pin = A4;
-const int ext_scl_pin = A5;
-#define EXT_I2C Wire1
-#define INT_I2C Wire
-#define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
-//#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
+  const int ext_sda_pin = A4;
+  const int ext_scl_pin = A5;
+  #define EXT_I2C Wire1
+  #define INT_I2C Wire
+  #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
+  //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT
 #endif
 
 
@@ -136,139 +136,151 @@ const int ext_scl_pin = A5;
 #include <Adafruit_GFX.h>
 
 #ifdef DISPLAY_SSD1351
-#warning "DISPLAY_SSD1351 128x128 OLED"
-#include <Adafruit_SSD1351.h>
-// Screen dimensions
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
-#define SIZE_1X
-// Hardware SPI pins
-// (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
-// an output.
-#define DC_PIN 4
-#define CS_PIN 5
-#define RST_PIN 6
-Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
-// Color definitions
-#define BLACK 0x0000
-#define BLUE 0x001F
-#define RED 0xF800
-#define GREEN 0x07E0
-#define CYAN 0x07FF
-#define MAGENTA 0xF81F
-#define YELLOW 0xFFE0
-#define WHITE 0xFFFF
+  #warning "DISPLAY_SSD1351 128x128 OLED"
+  #include <Adafruit_SSD1351.h>
+  // Screen dimensions
+  #define SCREEN_WIDTH 128
+  #define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
+  #define SIZE_1X
+  // Hardware SPI pins
+  // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
+  // an output.
+  #define DC_PIN 4
+  #define CS_PIN 5
+  #define RST_PIN 6
+  Adafruit_SSD1351 display = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, CS_PIN, DC_PIN, RST_PIN);
+  // Color definitions
+  #define BLACK 0x0000
+  #define BLUE 0x001F
+  #define RED 0xF800
+  #define GREEN 0x07E0
+  #define CYAN 0x07FF
+  #define MAGENTA 0xF81F
+  #define YELLOW 0xFFE0
+  #define WHITE 0xFFFF
 #endif
 
 #ifdef DISPLAY_ST7789
-#warning "DISPLAY_ST7789 Built-in display on ESP32-S3 TFT"
-#include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
-#define SCREEN_WIDTH 240
-#define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
-#define SIZE_2X            // All text double-size
+  #warning "DISPLAY_ST7789 Built-in display on ESP32-S3 TFT"
+  #include <Adafruit_ST7789.h>  // Hardware-specific library for ST7789
+  #define SCREEN_WIDTH 240
+  #define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
+  #define SIZE_2X            // All text double-size
 
-// Use dedicated hardware SPI pins
-Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+  // Use dedicated hardware SPI pins
+  Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-#define DISPLAY_BACKLIGHT
-const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
+  #define DISPLAY_BACKLIGHT
+  const int backlightPin = TFT_BACKLITE;  // PWM output to drive dimmable backlight
 
-#define WHITE ST77XX_WHITE
-#define BLACK ST77XX_BLACK
-#define BLUE ST77XX_BLUE
-#define RED ST77XX_RED
-#define GREEN ST77XX_GREEN
-#define CYAN ST77XX_CYAN
-#define MAGENTA ST77XX_MAGENTA
-#define YELLOW ST77XX_YELLOW
+  #define WHITE ST77XX_WHITE
+  #define BLACK ST77XX_BLACK
+  #define BLUE ST77XX_BLUE
+  #define RED ST77XX_RED
+  #define GREEN ST77XX_GREEN
+  #define CYAN ST77XX_CYAN
+  #define MAGENTA ST77XX_MAGENTA
+  #define YELLOW ST77XX_YELLOW
 
 #endif
 
 #ifdef DISPLAY_SH1107
-#warning "DISPLAY_SH1107 - Adafruit OLED either feather 64x128 or external 128x128"
-#include <Adafruit_SH110X.h>
-// SH1107 needs display.display() after drawing
-#define DISPLAY_DISPLAY_CMD
+  #warning "DISPLAY_SH1107 - Adafruit OLED either feather 64x128 or external 128x128"
+  #include <Adafruit_SH110X.h>
+  // SH1107 needs display.display() after drawing
+  #define DISPLAY_DISPLAY_CMD
 
-#ifdef FEATHER_OLED
-const int display_address = 0x3C;
-#define SCREEN_HEIGHT 64
-#else  // standalone OLED
-const int display_address = 0x3D;
-#define SCREEN_HEIGHT 128
-#endif
+  #ifdef FEATHER_OLED
+    const int display_address = 0x3C;
+    #define SCREEN_HEIGHT 64
+  #else  // standalone OLED
+    const int display_address = 0x3D;
+    #define SCREEN_HEIGHT 128
+  #endif
 
-#define SCREEN_WIDTH 128
-#define SIZE_1X
+  #define SCREEN_WIDTH 128
+  #define SIZE_1X
 
-Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
+  Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
 
-// Monochrome, all colors are white
-#define WHITE SH110X_WHITE
-#define BLACK SH110X_BLACK
-#define BLUE WHITE
-#define RED WHITE
-#define GREEN WHITE
-#define CYAN WHITE
-#define MAGENTA WHITE
-#define YELLOW WHITE
+  // Monochrome, all colors are white
+  #define WHITE SH110X_WHITE
+  #define BLACK SH110X_BLACK
+  #define MONOCHROME
 
 #endif
 
 #ifdef DISPLAY_ST7920
-#warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
-#include "ST7920_GFX_Library.h"
+  #warning "DISPLAY_ST7920 - 3 inch 128x64 LCD matrix"
+  #include "ST7920_GFX_Library.h"
 
-// ST7920 needs display.display() after drawing
-#define DISPLAY_DISPLAY_CMD
+  // ST7920 needs display.display() after drawing
+  #define DISPLAY_DISPLAY_CMD
+  #define SIZE_1X
 
-// Backlight pin
-#define DISPLAY_BACKLIGHT
-const int backlightPin = 20;
+  // Backlight pin
+  #define DISPLAY_BACKLIGHT
 
-#define SIZE_1X
+  #ifdef FEATHER_RP2040
+    // Pins specific to the Feather RP2040 build
+    const int backlightPin = 20;
+    const int CS_PIN = 0;
+    // Use the 192 pixel width ST7920 on the Feather build
+    #define SCREEN_WIDTH 192
+  #else
+    // Pins on RP2040 Pico build
+    const int backlightPin = 28;
+    const int CS_PIN = 17;
+    // Standard 128 pixel wide ST7920 LCD.
+    #define SCREEN_WIDTH 128
+  #endif
+  // Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
+  //const int MOSI_PIN = 19;
+  const int CLK1_PIN = 18;
+  // 192-column ST7920 uses a second CLK pin
+  const int CLK2_PIN = 6;
+  //  ST7920 LCD RST       [ora]   GP01              2  from lower left
+  //  ST7920 LCD CS (RS)   [ylw]   GP00              1
+  //  ST7920 LCD SCLK1(E1) [blu]   GP18              5  // Hardware constraint for SPI0CK
+  //  ST7920 LCD SCLK2(E2) [pur]   GP06   lower left 0  // Hardware constraint for SPI0CK
+  //  ST7920 LCD MOSI (RW) [grn]   GP19              4  // Hardware constraint for SPI0MOSI
+  #define SCREEN_HEIGHT 64
+  //ST7920 display(CS_PIN);
+  #if SCREEN_WIDTH == 192
+    ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
+  #else
+    ST7920 display(CS_PIN);
+  #endif
 
-// Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
-const int CS_PIN = 0;
-//const int MOSI_PIN = 19;
-const int CLK1_PIN = 18;
-const int CLK2_PIN = 6;
-//  ST7920 LCD RST       [ora]   GP01              2  from lower left
-//  ST7920 LCD CS (RS)   [ylw]   GP00              1
-//  ST7920 LCD SCLK1(E1) [blu]   GP18              5  // Hardware constraint for SPI0CK
-//  ST7920 LCD SCLK2(E2) [pur]   GP06   lower left 0  // Hardware constraint for SPI0CK
-//  ST7920 LCD MOSI (RW) [grn]   GP19              4  // Hardware constraint for SPI0MOSI
-#define SCREEN_HEIGHT 64
-#define SCREEN_WIDTH 192
-//ST7920 display(CS_PIN);
-ST7920_192 display(CS_PIN, CLK1_PIN, CLK2_PIN);
-
-// Monochrome, all colors are white
-// "Black" means background
-#define BLACK 0
-#define WHITE 1
-#define BLUE WHITE
-#define RED WHITE
-#define GREEN WHITE
-#define CYAN WHITE
-#define MAGENTA WHITE
-#define YELLOW WHITE
+  // Monochrome, all colors are white
+  // "Black" means background
+  #define BLACK 0
+  #define WHITE 1
+  #define MONOCHROME
 
 #endif
 
+#ifdef MONOCHROME
+  #define BLUE WHITE
+  #define RED WHITE
+  #define GREEN WHITE
+  #define CYAN WHITE
+  #define MAGENTA WHITE
+  #define YELLOW WHITE
+#endif
 
 #ifdef SIZE_1X
-// 1x size
-#define SMALL_SIZE 1
-#define LARGE_SIZE 2
-#define ROW_H 8
-#define CHAR_W 6
+  // 1x size
+  #define SMALL_SIZE 1
+  #define LARGE_SIZE 2
+  #define ROW_H 8
+  #define CHAR_W 6
 #else
-// 2x size
-#define SMALL_SIZE 2
-#define LARGE_SIZE 4
-#define ROW_H 16
-#define CHAR_W 12
+  // 2x size
+  #define SMALL_SIZE 2
+  #define LARGE_SIZE 4
+  #define ROW_H 16
+  #define CHAR_W 12
 #endif
 
 uint8_t backlight_brightness = 255;
@@ -988,10 +1000,10 @@ void setup_dac(void) {
 bool serial_available = false;
 
 const int SECS_PER_DAY = 24 * 60 * 60;
-const int LOG_DATA_LEN = 120;                            // One value per pixel, roughly.
-const int LOG_INTERVAL_SECS = 4 * 60;                    // Minutes between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const int LOG_DATA_LEN = SCREEN_WIDTH;                   // One value per pixel.
+const int LOG_INTERVAL_SECS = 20 * 60;                   // Seconds between each logged value. 12 min x 120 vals = 1440 mins (24 h).
 const int LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
-const int SUBDIV_SECS = (30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
+const int SUBDIV_SECS = 6 * 60 * 60; //(30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
 
 int log_data[LOG_DATA_LEN];
 time_t log_times[LOG_DATA_LEN];
@@ -1083,45 +1095,45 @@ void setup_logger(void) {
 
 // Layout
 #if SCREEN_HEIGHT == 135
-const int16_t overall_top_y = 0;
-const int16_t date_midline_y = overall_top_y + 16;
-const int16_t time_midline_y = overall_top_y + 52;
-const int16_t seconds_midline_y = overall_top_y + 80;
-const int16_t log_top_y = overall_top_y + 102;
-const int16_t log_width = 192;
-const int16_t log_height = 32;
-const int16_t display_mid_x = 120;
-const int8_t secs_x_scale = 3;
-const int8_t secs_height = 8;
-#include <Fonts/FreeSans12pt7b.h>
-#include <Fonts/FreeSansBold24pt7b.h>
-#include <Fonts/CalBlk36.h>
-#include <Fonts/HD44780.h>
-#define SMALLFONT &FreeSans12pt7b
-#define MICROFONT &HD44780
-#define MICROFONT_H (8)
-#define MICROFONT_W (6)
-#define CalBlk36 &CalBlk3612pt7b
+  const int16_t overall_top_y = 0;
+  const int16_t date_midline_y = overall_top_y + 16;
+  const int16_t time_midline_y = overall_top_y + 52;
+  const int16_t seconds_midline_y = overall_top_y + 80;
+  const int16_t log_top_y = overall_top_y + 102;
+  const int16_t log_width = 192;
+  const int16_t log_height = 32;
+  const int16_t display_mid_x = 120;
+  const int8_t secs_x_scale = 3;
+  const int8_t secs_height = 8;
+  #include <Fonts/FreeSans12pt7b.h>
+  #include <Fonts/FreeSansBold24pt7b.h>
+  #include <Fonts/CalBlk36.h>
+  #include <Fonts/HD44780.h>
+  #define SMALLFONT &FreeSans12pt7b
+  #define MICROFONT &HD44780
+  #define MICROFONT_H (8)
+  #define MICROFONT_W (6)
+  #define CalBlk36 &CalBlk3612pt7b
 #endif
 #if SCREEN_HEIGHT == 64
-const int16_t overall_top_y = 0;
-const int16_t date_midline_y = overall_top_y + 3;
-const int16_t time_midline_y = overall_top_y + 25;
-const int16_t seconds_midline_y = overall_top_y + 36;
-const int16_t log_top_y = overall_top_y + 43;
-const int16_t log_width = 128;
-const int16_t log_height = 21;
-const int16_t display_mid_x = 64;
-const int8_t secs_x_scale = 2;
-const int8_t secs_height = 2;
-#include <Fonts/CalBlk36.h>
-#include <Fonts/HD44780.h>
-#include <Fonts/TomThumb.h>
-#define SMALLFONT &HD44780
-#define MICROFONT &TomThumb
-#define MICROFONT_W (4)
-#define MICROFONT_H (6)
-#define CalBlk36 &CalBlk3612pt7b
+  const int16_t overall_top_y = 0;
+  const int16_t date_midline_y = overall_top_y + 3;
+  const int16_t time_midline_y = overall_top_y + 25;
+  const int16_t seconds_midline_y = overall_top_y + 36;
+  const int16_t log_top_y = overall_top_y + 43;
+  const int16_t log_width = SCREEN_WIDTH;
+  const int16_t log_height = 21;
+  const int16_t display_mid_x = 64;
+  const int8_t secs_x_scale = 2;
+  const int8_t secs_height = 2;
+  #include <Fonts/CalBlk36.h>
+  #include <Fonts/HD44780.h>
+  #include <Fonts/TomThumb.h>
+  #define SMALLFONT &HD44780
+  #define MICROFONT &TomThumb
+  #define MICROFONT_W (4)
+  #define MICROFONT_H (6)
+  #define CalBlk36 &CalBlk3612pt7b
 #endif
 
 uint16_t big_colon_width = 0;
@@ -2580,6 +2592,9 @@ void encode_time_to_regs(const DateTime &dt, uint8_t *buffer) {
   buffer[6] = bin2bcd(dt.year() - 2000U);
 }
 
+  // Initialize Aging specifically for RP2040 with Abracon OCXO
+#define INITIAL_DS3231_AGING 18
+
 void ds3231_setup() {
   // Zero-out registers.
   for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
@@ -2589,8 +2604,8 @@ void ds3231_setup() {
   encode_time_to_regs(DateTime(2000, 1, 1, 0, 0, 0), registers);
   // Initialize temperature to something plausible, 25.0 C
   registers[DS3231_TEMPERATUREREG] = 25;
-  // Initialize Aging specifically for RP2040 with Abracon OCXO
-  registers[DS3231_AGING] = 20;
+  // Initialize Aging
+  registers[DS3231_AGING] = INITIAL_DS3231_AGING;
 
   // Copy to 2nd registers.
   for (int i = 0; i < NUM_REGISTERS + 1; ++i) {
