@@ -1448,7 +1448,7 @@ int logger_display(time_t t, uint8_t redraw = false) {
   }
 
   // Logging plot setup
-  const int log_x = mid_x - (log_width >> 1);
+  const int log_x = (SCREEN_WIDTH >> 1) - (log_width >> 1);
   const int log_y = log_top_y;
   const int log_w = log_width;
   const int log_h = log_height;
