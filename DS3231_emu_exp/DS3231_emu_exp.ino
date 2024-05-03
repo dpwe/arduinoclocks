@@ -109,18 +109,24 @@
     //#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
     //#define FEATHER_OLED    // Different address than ext OLED.
     #define DISPLAY_ST7920    // {128,192}x64 green-yellow LCD matrix
+    #define EXT_I2C Wire1     // Feather has reorderd the I2C pins to look right to Arduino users
+    #define INT_I2C Wire
+    // Initialize Aging specifically for RP2040 with Abracon OCXO
+    #define INITIAL_DS3231_AGING 18
   #else
     #define MY_PICO_RP2040
     #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
+    #define EXT_I2C Wire    // Pico still has "native" I2C numbering
+    #define INT_I2C Wire1
+    // VCOCXO does not neeed aging trim
+    #define INITIAL_DS3231_AGING 0
   #endif
   // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
   // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
   const int ext_sda_pin = 24;
   const int ext_scl_pin = 25;
-  #define EXT_I2C Wire1
   const int int_sda_pin = 2;
   const int int_scl_pin = 3;
-  #define INT_I2C Wire
 #else  // ESP32-S3
   const int ext_sda_pin = A4;
   const int ext_scl_pin = A5;
@@ -464,11 +470,11 @@ void draw_ppb(int x, int y, bool break_line=false) {
 void display_gps_status(int x, int y, bool include_ppb=false) {
   // GPS status
   display.setFont();
-  display.setCursor(x * CHAR_W, y * ROW_H);
+  display.setCursor((x + 1) * CHAR_W, y * ROW_H);
   if (gps_active) {
     display.setTextColor(BLACK, GREEN);
     display.print("GPS");
-    display.drawLine(x * CHAR_W - 1, y * ROW_H, x * CHAR_W - 1, (y + 1) * ROW_H - 1, WHITE);
+    display.drawLine((x + 1) * CHAR_W - 1, y * ROW_H, (x + 1) * CHAR_W - 1, (y + 1) * ROW_H - 1, WHITE);
   } else {
     display.setTextColor(GREEN, BLACK);
     display.print("   ");
@@ -1383,6 +1389,66 @@ void sprint_date(class DateTime &dt, char *datestr) {
 //TimeChangeRule mySTD = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
 //Timezone myTZ(myDST, mySTD);
 
+// ----------------------------------------
+// DST logic (from awesomeclock_1632_trinket)
+// ----------------------------------------
+
+int dst_cache_year = -1;
+int dst_start_day = 0;
+int dst_end_day = 0;
+
+uint8_t days_in_month(uint8_t month, bool leapyear) {
+  if (month == 2) return 28 + leapyear;
+  return 30 + ((month + (month > 7)) % 2);
+}
+
+int day_of_year(uint8_t year, uint8_t month, uint8_t day) {
+  // Jan 1st is 0
+  bool leapyear = (year % 4) == 0;
+  int day_of_year = 0;
+  for (int i = 1; i < month; ++i) day_of_year += days_in_month(i, leapyear);
+  return day_of_year + (day - 1);
+}
+
+void calc_timechange_days(int year) {
+  // Jan 1st 2000 was a Saturday.  So what day is March 1st this year? 0 = Sun.
+  year -= 2000;
+  uint8_t march_first_dow = (6 + 365L * year + ((year + 4) / 4) + 31 + 28) % 7;
+  uint8_t second_sunday_date = 14 - ((march_first_dow - 1) % 7);
+  dst_start_day = 31 + 28 + ((year % 4) == 0) + second_sunday_date - 1;
+  // March and November are 245 days == 35.0 weeks apart, so 1st sunday in Nov is the same DOW
+  dst_end_day = dst_start_day + 245 - 7;  // 1st sunday, not 2nd.
+  dst_cache_year = year;
+}
+
+// ET DST begins at 2am local time on 2nd Sunday in March.
+// At that point, local time is UTC-5, so 2am local is 7am UTC.
+// The local time jumps to 3am.
+// ET DST ends at 2am local time on 1st Sunday in November.
+// At that point, local time is UTC-4, so 2am local is 6am UTC.
+// The local time then slips back to 1am (UTC-5).
+
+// Only works for UTC-1 to UTC-12
+// so that 2am local is still the same date in UTC, even in DST,
+// and logic only allows shift to local time to move date *backwards*.
+#define STANDARD_TIME_DIFF_HOURS -5  // US ET
+
+time_t make_localtime(time_t utc) {
+  DateTime now(utc);
+  if (now.year() > 2010) {   // Skip if utc is degenerate i.e. not sync'd
+    if (dst_cache_year != now.year())  calc_timechange_days(now.year());
+    // 2am local in North America is 2am + 4/5 in UTC
+    int DoY = day_of_year(now.year() - 2000, now.month(), now.day());
+    bool sprung_forward = (DoY > dst_start_day) ||
+                          ((DoY == dst_start_day) && (now.hour() >= 2 - STANDARD_TIME_DIFF_HOURS));
+    bool fallen_back = (DoY > dst_end_day) ||
+                        ((DoY == dst_end_day) && (now.hour() >= 2 - (STANDARD_TIME_DIFF_HOURS + 1)));  // offset is DST
+    bool is_dst = sprung_forward - fallen_back;
+    utc += 3600 * (STANDARD_TIME_DIFF_HOURS + is_dst);
+  }
+  return utc;
+}
+
 int logger_display(time_t t, uint8_t redraw = false) {
   // Returns minutes within day (0..1440).
   //u8g2.clearBuffer();   // for _F_ initializer only
@@ -1393,8 +1459,7 @@ int logger_display(time_t t, uint8_t redraw = false) {
   //time_t localtime = myTZ.toLocal(t);
   //time_t localtime = t - 4 * 60 * 60;
   //DateTime dt(localtime);
-  t -= 4 * 60 * 60;
-  DateTime dt(t);
+  DateTime dt(make_localtime(t));
 
   //serial_print_tm(tm);
   int mins_within_day = 60 * dt.hour() + dt.minute();
@@ -1484,7 +1549,9 @@ int logger_display(time_t t, uint8_t redraw = false) {
     draw_log_output(log_x, log_y, log_w, log_h);
   }
 
+#if SCREEN_WIDTH==192
   display_gps_status(22, 0, /*include_ppb=*/true);
+#endif
 
 #ifdef DISPLAY_DISPLAY_CMD
   display.display();
@@ -1656,6 +1723,9 @@ bool set_time_on_gps_sync = true;
 // Is the display currently active?
 bool display_on = true;
 
+// Timestamp of last GPS PPS pulse seen.
+unsigned long last_gps_micros = 0;
+
 void handle_cmd(char cmd, char *arg) {
   // Actually interpret and execute command, already broken up into 1 char cmd and arg string.
   // Number of characters in argument.
@@ -1722,6 +1792,10 @@ void handle_cmd(char cmd, char *arg) {
         set_time_on_gps_sync = atob(arg);
       }
       print_enabled_disabled("Time sync on GPS lock", set_time_on_gps_sync);
+      Serial.print("last_gps_micros=");
+      Serial.println(last_gps_micros);
+      Serial.print("last gps msg=");
+      Serial.println(last_gps_msg());
       break;
 
     case 'I':
@@ -1947,16 +2021,13 @@ void cmd_update(void) {
 //   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
 //   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
 #ifdef MY_PICO_RP2040
-#ifdef MY_PICO_RP2040_LCD
-const int ppsPin = 6;  // PPS output from GPS board
-#warning "pps pin GP6"
+  const int ppsPin = 6;  // PPS output from GPS board
+  #warning "pps pin GP6"
+  //const int ppsPin = 8;  // PPS output from GPS board
+  //#warning "pps pin GP8"
 #else
-const int ppsPin = 8;  // PPS output from GPS board
-#warning "pps pin GP8"
-#endif
-#else
-const int ppsPin = A2;  // PPS output from GPS board
-#warning "pps pin A2"
+  const int ppsPin = A2;  // PPS output from GPS board
+  #warning "pps pin A2"
 #endif
 
 volatile unsigned long gps_micros = 0;
@@ -2013,9 +2084,9 @@ void setup_interrupts() {
 
 // 2nd UART on Pico - RX,TX is GP5,GP4 (or GP9,GP8)
 #ifdef MY_PICO_RP2040
-#define SerialGPS Serial2
+  #define SerialGPS Serial2
 #else
-#define SerialGPS Serial1
+  #define SerialGPS Serial1
 #endif
 
 TinyGPS gps;
@@ -2060,7 +2131,7 @@ time_t gps_unixtime(void) {
   return time;
 }
 
-unsigned long last_gps_micros = 0;
+//unsigned long last_gps_micros = 0;
 //time_t last_gps_sync_unixtime = 0;
 
 void sync_time_from_GPS(void) {
@@ -2086,19 +2157,16 @@ void sync_time_from_GPS(void) {
 
 void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040
-#ifdef MY_PICO_RP2040
-// Configure Pico UART2
-#ifdef MY_PICO_RP2040_LCD
-  SerialGPS.setTX(8);
-  SerialGPS.setRX(9);
-#else
-  SerialGPS.setTX(4);
-  SerialGPS.setRX(5);
-#endif
-#else
-  SerialGPS.setRX(1);
-  SerialGPS.setTX(0);
-#endif
+  #ifdef MY_PICO_RP2040
+    // Configure Pico UART2
+    SerialGPS.setTX(8);
+    SerialGPS.setRX(9);
+    //SerialGPS.setTX(4);
+    //SerialGPS.setRX(5);
+  #else
+    SerialGPS.setRX(1);
+    SerialGPS.setTX(0);
+  #endif
   SerialGPS.begin(9600);
 #else
   // Feather ESP32
@@ -2106,11 +2174,36 @@ void setup_GPS_serial(void) {
 #endif
 }
 
+// Keep two copies of the latest gps_msg so we can retain the last complete one.
+#define GPS_MSG_BUF_LEN 128
+char gps_msg_buf[2][GPS_MSG_BUF_LEN];
+int gps_msg_buf_current = 0;
+int gps_msg_chars[2] = {0, 0};
+
+char *last_gps_msg(void) {
+  int last_buf = 1 - gps_msg_buf_current;
+  // Add a terminator before returning.
+  gps_msg_buf[last_buf][gps_msg_chars[last_buf]] = '\0';
+  return gps_msg_buf[last_buf];
+}
+
 void update_GPS_serial(void) {
   while (SerialGPS.available()) {
     char c = SerialGPS.read();
     //Serial.print(c);
     gps.encode(c);
+    // Keep our own copy of the string outside the buffer, for debug.
+    if (c == '\r' || c == '\n') {
+      // Newline.  Swap buffers if there's anything in the current buffer.
+      if (gps_msg_chars[gps_msg_buf_current] > 0) {
+        gps_msg_buf_current = 1 - gps_msg_buf_current;
+        // Reset the new-current buffer pos.
+        gps_msg_chars[gps_msg_buf_current] = 0;
+      }
+    } else if (gps_msg_chars[gps_msg_buf_current] < GPS_MSG_BUF_LEN - 1) {
+      gps_msg_buf[gps_msg_buf_current][gps_msg_chars[gps_msg_buf_current]] = c;
+      ++gps_msg_chars[gps_msg_buf_current];
+    }
   }
 }
 
@@ -2593,7 +2686,7 @@ void encode_time_to_regs(const DateTime &dt, uint8_t *buffer) {
 }
 
   // Initialize Aging specifically for RP2040 with Abracon OCXO
-#define INITIAL_DS3231_AGING 18
+//#define INITIAL_DS3231_AGING 18
 
 void ds3231_setup() {
   // Zero-out registers.
@@ -2870,18 +2963,15 @@ void sleep_tickle(void) {
 
 #define NUM_BUTTONS 3  // on D9, D6, D5 on feather OLED wing are GPIO 9, 8, 7 on RP2040 Feather
 #ifdef ARDUINO_ARCH_RP2040
-#ifdef FEATHER_RP2040  // i.e., this is a Feather RP2040
-int button_pins[NUM_BUTTONS] = { 9, 8, 7 };
-#warning "Feather RP2040"
-#else  // RP2040 Pico
-#ifdef MY_PICO_RP2040_LCD
-int button_pins[NUM_BUTTONS] = { 20, 21, 22 };
+  #ifdef FEATHER_RP2040  // i.e., this is a Feather RP2040
+    int button_pins[NUM_BUTTONS] = { 9, 8, 7 };
+    #warning "Feather RP2040"
+  #else  // RP2040 Pico
+    int button_pins[NUM_BUTTONS] = { 20, 21, 22 };
+    //int button_pins[NUM_BUTTONS] = { 18, 19, 20 };
+  #endif
 #else
-int button_pins[NUM_BUTTONS] = { 18, 19, 20 };
-#endif
-#endif
-#else
-int button_pins[NUM_BUTTONS] = { 9, 6, 5 };
+  int button_pins[NUM_BUTTONS] = { 9, 6, 5 };
 #endif
 int button_state[NUM_BUTTONS] = { 0, 0, 0 };
 unsigned long button_last_change_time[NUM_BUTTONS] = { 0, 0, 0 };
