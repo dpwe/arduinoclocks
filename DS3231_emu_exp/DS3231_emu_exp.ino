@@ -1261,11 +1261,25 @@ int y_offset_per_data(int data_y, int mid_y) {
   }
 }
 
-void draw_time_of_day(int x, int y, int day_mins, bool show_minutes = true) {
+char dow_names[] = "SunMonTueWedThuFriSat";
+
+void draw_time_of_day(int x, int y, time_t time_secs, bool show_minutes = true) {
   // Plot a time as HH:MM (or just HH if not show_minutes) using tiny font.
   // x, y is bottom-left
+  int day_mins = (time_secs % SECS_PER_DAY) / 60;
   char str[3];
-  *(sprint_int2(str, day_mins / 60)) = '\0';
+  if (day_mins == 0 && !show_minutes) {
+    // Show Day of Week instead of 00 for midnight.
+    DateTime dt(time_secs);
+    int day_of_week = dt.dayOfTheWeek() % 7;
+    str[0] = dow_names[3 * day_of_week];
+    str[1] = dow_names[3 * day_of_week + 1];
+    str[2] = '\0';
+  } else {
+    *(sprint_int2(str, day_mins / 60)) = '\0';
+  }
+  // The TomThumb "1" is only 2 pixels wide, shift one pixel right to align with "0" and "2" etc.
+  if (str[0] == '1') ++x;
   display.setCursor(x, y);
   display.print(str);
   if (show_minutes) {
@@ -1294,19 +1308,19 @@ void draw_log_output(int x, int y, int w, int h) {
   int last_data = 0;
   uint8_t first_x = 0;
   uint8_t first_y = 0;
-  time_t first_time_mins = INVALID_TIME;
+  time_t first_time_secs = INVALID_TIME;
   int last_subdiv = -1;
   for (int i = 0; i < LOG_DATA_LEN; ++i) {
     last_data = log_data[i];
     if (log_times[i] != INVALID_TIME) {
-      time_t localtime = log_times[i] - 4 * 60 * 60;
+      time_t localtime = make_localtime(log_times[i]);
       int new_y = y + (h - 1) - ((data_scale * (last_data - data_min)) >> 8);
       int new_x = data_x + (i * (data_w - 1) / (LOG_DATA_LEN - 1));
       if (last_x_valid) {
         display.drawLine(last_x, last_y, new_x, new_y, fgcolor);
       }
-      // Add vertical lines every 6h transition.
-      int subdiv = localtime / SUBDIV_SECS;
+      // Add vertical lines at multiples of SUBDIV_SECS.
+      time_t subdiv = localtime / SUBDIV_SECS;
       if (subdiv != last_subdiv) {
         if (last_subdiv >= 0) {
           display.drawLine(new_x, y, new_x, y + h, fgcolor);
@@ -1314,9 +1328,9 @@ void draw_log_output(int x, int y, int w, int h) {
           int vert_line_legend_x = new_x - (2 * MICROFONT_W);
           // Don't draw if it's going to splay off the left.
           if (vert_line_legend_x >= data_x) {
-            int legend_time_of_day_in_mins = ((subdiv * SUBDIV_SECS) % SECS_PER_DAY) / 60;
-            draw_time_of_day(vert_line_legend_x, y - 1 + MICROFONT_H, legend_time_of_day_in_mins, 
-                      /* show_minutes= */ (legend_time_of_day_in_mins % 60) != 0);
+            time_t legend_time_secs = subdiv * SUBDIV_SECS;
+            draw_time_of_day(vert_line_legend_x, y - 1 + MICROFONT_H, legend_time_secs, 
+                      /* show_minutes= */ (legend_time_secs % 3600) != 0);
           }
         }
         last_subdiv = subdiv;
@@ -1324,8 +1338,8 @@ void draw_log_output(int x, int y, int w, int h) {
       last_x = new_x;
       last_y = new_y;
       last_x_valid = true;
-      if (first_time_mins == INVALID_TIME) {
-        first_time_mins = (localtime % SECS_PER_DAY) / 60;
+      if (first_time_secs == INVALID_TIME) {
+        first_time_secs = localtime;
         first_x = last_x;
         first_y = last_y;  // Needed to position earliest timestamp below.
       }
@@ -1342,7 +1356,7 @@ void draw_log_output(int x, int y, int w, int h) {
     // Only draw first_time if it doesn't impinge on legend at left.
     int first_time_x = first_x - (4 * MICROFONT_W + 1);
     if (first_time_x >= data_x) {
-      draw_time_of_day(first_time_x, first_y + y_offset, first_time_mins);
+      draw_time_of_day(first_time_x, first_y + y_offset, first_time_secs);
     }
     // Label current value.
     y_offset = y_offset_per_data(last_y, mid_y);
@@ -1362,8 +1376,6 @@ void draw_log_output(int x, int y, int w, int h) {
 
 int8_t last_day = 0, last_hour = -1, last_minute = -1;
 uint8_t colon_visible = true;
-
-char dow_names[] = "SunMonTueWedThuFriSat";
 
 void sprint_date(class DateTime &dt, char *datestr) {
   // Fake dt.toString for our format.  Pad each end with spaces to get proper clearing of previous.
@@ -1512,12 +1524,6 @@ int logger_display(time_t t, uint8_t redraw = false) {
     display.fillRect(base_x, base_y, bar_width, secs_height, bgcolor);
   }
 
-  // Logging plot setup
-  const int log_x = (SCREEN_WIDTH >> 1) - (log_width >> 1);
-  const int log_y = log_top_y;
-  const int log_w = log_width;
-  const int log_h = log_height;
-
   {
     // Large digits time.
     display.setFont(CalBlk36);
@@ -1546,7 +1552,7 @@ int logger_display(time_t t, uint8_t redraw = false) {
     print_text(digit_string, mid_x + (big_colon_width / 2) + 2, time_midline_y,
                LEFT, MIDDLE, digits_width, digits_height, false, digits_baseline_shift);
     // Update log when minutes change.
-    draw_log_output(log_x, log_y, log_w, log_h);
+    draw_log_output((SCREEN_WIDTH >> 1) - (log_width >> 1), log_top_y, log_width, log_height);
   }
 
 #if SCREEN_WIDTH==192
