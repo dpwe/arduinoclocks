@@ -66,13 +66,13 @@
 
 //  ST7920 LCD RST   GP16
 //  ST7920 LCD CS/RS GP17                 GP0
-//  ST7920 LCD SCLK  GP18                 GP18+6 (192x64)
+//  ST7920 LCD SCLK  GP18(+6)             GP18+6 (192x64)
 //  ST7920 LCD MOSI  GP19                 GP19
 //  Backlight        GP28                 GP20       (built-in GP45)
 
-//  BTN A            GP18/20              GP9             GP9      press:           long press: sleep display
-//  BTN B            GP19/21              GP8             GP6      press: inc trim  long press: ?save trim to eeprom
-//  BTN C            GP20/22              GP7             GP5      press: dec trim  long press: sync to GPS
+//  BTN A            GP20                 GP9             GP9      press:           long press: sleep display
+//  BTN B            GP21                 GP8             GP6      press: inc trim  long press: ?save trim to eeprom
+//  BTN C            GP22                 GP7             GP5      press: dec trim  long press: sync to GPS
 //
 //  DESIGN
 //
@@ -118,8 +118,11 @@
     #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
     #define EXT_I2C Wire    // Pico still has "native" I2C numbering
     #define INT_I2C Wire1
+    // Is Serial2 on 8/9 or 4/5?
+    //#define PICO_SERIAL_89
     // VCOCXO does not neeed aging trim
-    #define INITIAL_DS3231_AGING 0
+    #define INITIAL_DS3231_AGING -50
+    #define SLOW_CONNOR_OCXO  // The super small Connor OCXO needs a different base count.
   #endif
   // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
   // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
@@ -238,18 +241,19 @@
     const int backlightPin = 28;
     const int CS_PIN = 17;
     // Standard 128 pixel wide ST7920 LCD.
-    #define SCREEN_WIDTH 128
+    //#define SCREEN_WIDTH 128
+    #define SCREEN_WIDTH 192
   #endif
   // Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
   //const int MOSI_PIN = 19;
   const int CLK1_PIN = 18;
   // 192-column ST7920 uses a second CLK pin
   const int CLK2_PIN = 6;
-  //  ST7920 LCD RST       [ora]   GP01              2  from lower left
-  //  ST7920 LCD CS (RS)   [ylw]   GP00              1
-  //  ST7920 LCD SCLK1(E1) [blu]   GP18              5  // Hardware constraint for SPI0CK
-  //  ST7920 LCD SCLK2(E2) [pur]   GP06   lower left 0  // Hardware constraint for SPI0CK
-  //  ST7920 LCD MOSI (RW) [grn]   GP19              4  // Hardware constraint for SPI0MOSI
+  //  ST7920 LCD RST       [ora]   
+  //  ST7920 LCD CS (RS)   [ylw]   GP17
+  //  ST7920 LCD SCLK1(E1) [blu]   GP18
+  //  ST7920 LCD SCLK2(E2) [pur]   GP06
+  //  ST7920 LCD MOSI (RW) [grn]   GP19,,,,,,,,,,,,,,,
   #define SCREEN_HEIGHT 64
   //ST7920 display(CS_PIN);
   #if SCREEN_WIDTH == 192
@@ -1218,7 +1222,6 @@ void setup_logger_display(void) {
   display.setCursor(SCREEN_WIDTH - MICROFONT_W, MICROFONT_H);
   display.print("S");
   if (serial_available) {
-    Serial.println(F("Initialized"));
   } else {
     display.setCursor(SCREEN_WIDTH - MICROFONT_W, MICROFONT_H);
     display.print("#");
@@ -2027,10 +2030,13 @@ void cmd_update(void) {
 //   GPS tx out      -> GP5 (for Uart1 RX)   RX GP1           RX GP2
 //   GPS 1PPS out    -> GP8                  A2 GP28          A2 GP16
 #ifdef MY_PICO_RP2040
-  const int ppsPin = 6;  // PPS output from GPS board
-  #warning "pps pin GP6"
-  //const int ppsPin = 8;  // PPS output from GPS board
-  //#warning "pps pin GP8"
+  #ifdef PICO_SERIAL_89
+    const int ppsPin = 6;  // PPS output from GPS board
+    #warning "pps pin GP6"
+  #else
+    const int ppsPin = 8;  // PPS output from GPS board
+    #warning "pps pin GP8"
+  #endif
 #else
   const int ppsPin = A2;  // PPS output from GPS board
   #warning "pps pin A2"
@@ -2165,10 +2171,15 @@ void setup_GPS_serial(void) {
 #ifdef ARDUINO_ARCH_RP2040
   #ifdef MY_PICO_RP2040
     // Configure Pico UART2
-    SerialGPS.setTX(8);
-    SerialGPS.setRX(9);
-    //SerialGPS.setTX(4);
-    //SerialGPS.setRX(5);
+    #ifdef PICO_SERIAL_89
+      SerialGPS.setTX(8);
+      SerialGPS.setRX(9);
+      #warning "GPS Serial in on 9"
+    #else
+      SerialGPS.setTX(4);
+      SerialGPS.setRX(5);
+      #warning "GPS Serial in on 5"
+    #endif
   #else
     SerialGPS.setRX(1);
     SerialGPS.setTX(0);
@@ -2342,8 +2353,12 @@ int timer_tenMHzInputPin = 11;  // MUST BE ODD for RP2040
 
 uint8_t timer_sliceNum = 0;
 
-uint32_t timer_count_max = 10000000;  // 10 million
-//uint32_t timer_count_max = 9999999;  // 10 million - 1.  RP2040 Pico + Connor OCXO is 155 ppb slow
+#ifdef SLOW_CONNOR_OCXO
+  #warning "Base clock is 2 clocks fast (for slow Connor OCXO)"
+  uint32_t timer_count_max = 9999998;  // 10 million - 2.  RP2040 Pico + Connor OCXO is 250 ppb slow
+#else
+  uint32_t timer_count_max = 10000000;  // 10 million
+#endif
 volatile uint32_t timer_count_max_this_time = 0;
 volatile uint32_t timer_count = 0;
 const uint32_t timer_default_pwmTop = (1L << 16);
