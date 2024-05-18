@@ -109,6 +109,8 @@
     //#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
     //#define FEATHER_OLED    // Different address than ext OLED.
     #define DISPLAY_ST7920    // {128,192}x64 green-yellow LCD matrix
+    //#define SCREEN_WIDTH 128
+    #define SCREEN_WIDTH 192
     #define EXT_I2C Wire1     // Feather has reorderd the I2C pins to look right to Arduino users
     #define INT_I2C Wire
     // Initialize Aging specifically for Feather RP2040 with mini Connor OCXO
@@ -119,10 +121,19 @@
     #define EXT_I2C Wire    // Pico still has "native" I2C numbering
     #define INT_I2C Wire1
     // Is Serial2 on 8/9 or 4/5?
-    //#define PICO_SERIAL_89
     // VCOCXO does not neeed aging trim
-    #define INITIAL_DS3231_AGING -50
-    #define SLOW_CONNOR_OCXO  // The super small Connor OCXO needs a different base count.
+    //#define SLOW_CONNOR_OCXO  // The super small Connor OCXO needs a different base count.
+    #ifdef SLOW_CONNOR_OCXO
+      #define INITIAL_DS3231_AGING -50
+      #define SCREEN_WIDTH 192
+    #else
+      // VCOCXO does not neeed aging trim
+      #define INITIAL_DS3231_AGING 0
+      // VCOCXO has narrow LCD
+      #define SCREEN_WIDTH 128
+      // .. and uses 8/9 for serial etc.
+      #define PICO_SERIAL_89
+    #endif
   #endif
   // Hardware limits mean that pins 24 and 25 (A4 and A5, favored choice for ext_i2)
   // must be assigned to I2C0 aka Wire on RP2040.  Wire1 is only for pins 2(n+1), 2(n+1)+1.
@@ -234,15 +245,10 @@
     // Pins specific to the Feather RP2040 build
     const int backlightPin = 20;
     const int CS_PIN = 0;
-    // Use the 192 pixel width ST7920 on the Feather build
-    #define SCREEN_WIDTH 192
   #else
     // Pins on RP2040 Pico build
     const int backlightPin = 28;
     const int CS_PIN = 17;
-    // Standard 128 pixel wide ST7920 LCD.
-    //#define SCREEN_WIDTH 128
-    #define SCREEN_WIDTH 192
   #endif
   // Default hardware SPI pins - SCLK GP18 / MOSI GP19 / RST GP16
   //const int MOSI_PIN = 19;
