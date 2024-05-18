@@ -111,8 +111,8 @@
     #define DISPLAY_ST7920    // {128,192}x64 green-yellow LCD matrix
     #define EXT_I2C Wire1     // Feather has reorderd the I2C pins to look right to Arduino users
     #define INT_I2C Wire
-    // Initialize Aging specifically for RP2040 with Abracon OCXO
-    #define INITIAL_DS3231_AGING 18
+    // Initialize Aging specifically for Feather RP2040 with mini Connor OCXO
+    #define INITIAL_DS3231_AGING 35
   #else
     #define MY_PICO_RP2040
     #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
@@ -611,7 +611,6 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool displ
       sp += 2;
       *sp = '\0';
       display.print(s);
-      if (secs_since_sync < settle_time_since_sync) initial_skew_us = skew_us;
       draw_ppb(0, 5);
     } else {
       display.print("none");
@@ -2166,7 +2165,8 @@ void sync_time_from_GPS(void) {
     // Then, we delay for most of a second to be able to anticipate the actual moment
     // so we add another second to the time we set.
 #ifdef ARDUINO_ARCH_RP2040
-#define PREDELAY 997000
+// It gets about 400 us earlier when device is not connected to serial
+#define PREDELAY 997400
 #else
 #define PREDELAY 999600
 #endif
@@ -2244,8 +2244,10 @@ void setup_GPS(void) {
 #define MAX_DRIFT_SECS_BEFORE_GPS_RESYNC 10
 
 void update_GPS(void) {
-  if (last_gps_sync_unixtime)
+  if (last_gps_sync_unixtime) {
     secs_since_sync = ds3231_unixtime() - last_gps_sync_unixtime;
+    if (secs_since_sync < settle_time_since_sync) initial_skew_us = skew_us;
+  }
   if (gps_micros != last_gps_micros) {
     last_gps_micros = gps_micros;
     // Request for sync e.g. from button press.
