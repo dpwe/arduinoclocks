@@ -462,12 +462,15 @@ void draw_ppb(int x, int y, bool break_line=false) {
       display.print("-");
       ppb_times_100 = -ppb_times_100;
     }
-    itoa(ppb_times_100 / 100, s, 10);
+    int ppb = ppb_times_100 / 100;
+    itoa(ppb, s, 10);
     display.print(s);
-    display.print(".");
-    itoa2(ppb_times_100 % 100, s);
-    s[2] = '\0';
-    display.print(s);
+    if (ppb < 1000) {
+      display.print(".");
+      itoa2(ppb_times_100 % 100, s);
+      s[1 + (ppb < 100)] = '\0';
+      display.print(s);
+    }
   }
 }
 
@@ -1067,6 +1070,12 @@ void push_data(int new_data, time_t new_time) {
     Serial.print("new_data: ");
     Serial.println(new_data);
   }
+  // Don't log data that is more than 1000 different from last-logged data.
+  if ((log_times[LOG_DATA_LEN - 1] != INVALID_TIME) && (abs(new_data - log_data[LOG_DATA_LEN - 1]) > 1000)) {
+    Serial.print("Rejecting outlier data ");
+    Serial.println(new_data);
+    return;
+  }
   for (int i = 0; i < LOG_DATA_LEN - 1; ++i) {
     log_data[i] = log_data[i + 1];
     log_times[i] = log_times[i + 1];
@@ -1133,7 +1142,7 @@ void setup_logger(void) {
   const int16_t log_top_y = overall_top_y + 43;
   const int16_t log_width = SCREEN_WIDTH;
   const int16_t log_height = 21;
-  const int16_t display_mid_x = 64;
+  const int16_t display_mid_x = SCREEN_WIDTH / 2 - 12 * (SCREEN_WIDTH==192);
   const int8_t secs_x_scale = 2;
   const int8_t secs_height = 2;
   #include <Fonts/CalBlk36.h>
@@ -1559,7 +1568,7 @@ int logger_display(time_t t, uint8_t redraw = false) {
   }
 
 #if SCREEN_WIDTH==192
-  display_gps_status(22, 0, /*include_ppb=*/true);
+  display_gps_status(25, 0, /*include_ppb=*/true);
 #endif
 
 #ifdef DISPLAY_DISPLAY_CMD
@@ -2042,7 +2051,7 @@ void cmd_update(void) {
   #warning "pps pin A2"
 #endif
 
-volatile unsigned long gps_micros = 0;
+volatile uint32_t gps_micros = 0;
 
 //#ifdef ARDUINO_ARCH_RP2040
 #ifdef MY_PICO_RP2040
@@ -2250,7 +2259,7 @@ void update_GPS(void) {
       record_GPS_uptime = false;
     }
   }
-  if ((micros() - last_gps_micros) < 2000000) {
+  if ((micros() - last_gps_micros) < 1000000) {
     if (!gps_active && gps_time_valid(gps)) {
       Serial.println("GPS transition to true");
       record_GPS_uptime = true;
@@ -2263,7 +2272,7 @@ void update_GPS(void) {
       gps_active = true;
     }
   } else {
-    // More than 2 sec since last GPS time reported.
+    // More than 1 sec since last GPS time reported.
     if (gps_active) last_gps_downtime = ds3231.now();
     gps_active = false;
   }
@@ -3291,6 +3300,10 @@ void loop() {
   cmd_update();
   buttons_update();
 
+  // Handle input from GPS
+  update_GPS_serial();
+  update_GPS();
+
   if (polling_interval || (enable_sqwv_int && (last_tick_micros != tick_micros))) {
     last_tick_micros = tick_micros;
     DateTime dt = ds3231.now();
@@ -3298,21 +3311,19 @@ void loop() {
     if (now_sec != last_sec) {
       last_sec = now_sec;
       //update_display(dt);
-      if (display_on) {
-        update_display();
-      }
       //Serial.print("tick - gps=");
       //Serial.println((long int)(tick_micros - gps_micros));
-      if (raw_tick_count > 10) update_logger((int)(tick_micros - gps_micros), dt.unixtime());
+      // Only record skew re: GPS while GPS is active
+      if (gps_active && raw_tick_count > 10) 
+        update_logger((int)(tick_micros - gps_micros), dt.unixtime());
+      if (display_on)
+        update_display();
     }
   }
 
   // Maybe sleep display
   sleep_update();
 
-  // Handle input from GPS
-  update_GPS_serial();
-  update_GPS();
 
   delay(polling_interval);
 }
