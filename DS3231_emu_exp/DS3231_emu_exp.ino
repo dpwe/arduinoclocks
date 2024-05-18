@@ -3321,9 +3321,7 @@ void loop() {
       //update_display(dt);
       //Serial.print("tick - gps=");
       //Serial.println((long int)(tick_micros - gps_micros));
-      // Only record skew re: GPS while GPS is active
-      if (gps_active && raw_tick_count > 10) 
-        update_logger((int)(tick_micros - gps_micros), dt.unixtime());
+      update_logger(skew_us, dt.unixtime());
       if (display_on)
         update_display();
     }
