@@ -122,7 +122,7 @@
     #define INT_I2C Wire1
     // Is Serial2 on 8/9 or 4/5?
     // VCOCXO does not neeed aging trim
-    //#define SLOW_CONNOR_OCXO  // The super small Connor OCXO needs a different base count.
+    #define SLOW_CONNOR_OCXO  // The super small Connor OCXO needs a different base count.
     #ifdef SLOW_CONNOR_OCXO
       #define INITIAL_DS3231_AGING -50
       #define SCREEN_WIDTH 192
@@ -2152,9 +2152,7 @@ bool gps_time_valid(class TinyGPS &gps) {
 }
 
 time_t gps_unixtime(void) {
-  unsigned long time;
-  gps.get_datetime(0, &time, 0);
-  return time;
+  return gps_now(gps).unixtime();
 }
 
 //unsigned long last_gps_micros = 0;
@@ -2274,7 +2272,12 @@ void update_GPS(void) {
       if (set_time_on_gps_sync && abs((long)(gps_unixtime() - ds3231_unixtime())) > MAX_DRIFT_SECS_BEFORE_GPS_RESYNC) {
         // We're transitioning to GPS active, and we enabled auto-sync when GPS comes on
         // if the clock time is significantly different from GPS time.
-        Serial.println("request GPS resync");
+        Serial.print("request GPS resync: gps_unixtime=");
+        Serial.print(gps_unixtime());
+        Serial.print(" ds3231_unixtime=");
+        Serial.print(ds3231_unixtime());
+        Serial.print(" diff=");
+        Serial.println((long)(gps_unixtime() - ds3231_unixtime()));
         request_RTC_sync = true;
       }
       gps_active = true;
