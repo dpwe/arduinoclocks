@@ -120,9 +120,7 @@
     #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
     #define EXT_I2C Wire    // Pico still has "native" I2C numbering
     #define INT_I2C Wire1
-    // Is Serial2 on 8/9 or 4/5?
-    // VCOCXO does not neeed aging trim
-    #define SLOW_CONNOR_OCXO  // The super small Connor OCXO needs a different base count.
+    //#define SLOW_CONNOR_OCXO  // The super small Connor OCXO needs a different base count.
     #ifdef SLOW_CONNOR_OCXO
       #define INITIAL_DS3231_AGING -50
       #define SCREEN_WIDTH 192
@@ -131,7 +129,7 @@
       #define INITIAL_DS3231_AGING 0
       // VCOCXO has narrow LCD
       #define SCREEN_WIDTH 128
-      // .. and uses 8/9 for serial etc.
+      // .. and uses 8/9 (not 4/5) for serial etc.
       #define PICO_SERIAL_89
     #endif
   #endif
@@ -480,20 +478,29 @@ void draw_ppb(int x, int y, bool break_line=false) {
   }
 }
 
-void display_gps_status(int x, int y, bool include_ppb=false) {
+void display_gps_status(int x, int y, bool include_ppb=false, bool include_skew=true) {
   // GPS status
   display.setFont();
   display.setCursor((x + 1) * CHAR_W, y * ROW_H);
   if (gps_active) {
     display.setTextColor(BLACK, GREEN);
-    display.print("GPS");
+    if (include_skew)
+      display.print("GPS");
+    else  // Special case - if we're not printing skew, make it 1 chr wide.
+      display.print("G");
+    // Color in left-hand edge to make reverse-field look properly bounded.
     display.drawLine((x + 1) * CHAR_W - 1, y * ROW_H, (x + 1) * CHAR_W - 1, (y + 1) * ROW_H - 1, WHITE);
+    display.setTextColor(GREEN, BLACK);  // Make sure we don't mess up later prints.
   } else {
     display.setTextColor(GREEN, BLACK);
-    display.print("   ");
+    if (include_skew)
+      display.print("   ");
+    else
+      display.print(" ");
     display.drawLine(x * CHAR_W - 1, y * ROW_H, x * CHAR_W - 1, (y + 1) * ROW_H - 1, BLACK);
   }
-  display_skew_us(skew_us, x, y + 1);
+  if (include_skew)
+    display_skew_us(skew_us, x, y + 1);
   if (include_ppb)
     draw_ppb(x, y + 3, /*break_line=*/true);
 }
@@ -1574,6 +1581,8 @@ int logger_display(time_t t, uint8_t redraw = false) {
 
 #if SCREEN_WIDTH==192
   display_gps_status(25, 0, /*include_ppb=*/true);
+#else
+  display_gps_status(19, 0, /*include_ppb=*/false, /*include_skew=*/false);  // just "G" or nothing.
 #endif
 
 #ifdef DISPLAY_DISPLAY_CMD
