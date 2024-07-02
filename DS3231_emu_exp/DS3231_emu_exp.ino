@@ -505,6 +505,10 @@ void display_gps_status(int x, int y, bool include_ppb=false, bool include_skew=
     draw_ppb(x, y + 3, /*break_line=*/true);
 }
 
+// forward decl
+bool dac_available = false;
+int dac_get_value(void);
+
 void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool display_detail) {
   // Graphical display of DS3231 state for 16x8 display:
   // HHHH::MMMM::SSSS
@@ -588,7 +592,12 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool displ
     display.setTextColor(RED, BLACK);
     display.setCursor(0, 7 * ROW_H);
     strcpy(s, "A:");
-    itoa(ds3231.getAging(), s + 2, 10);
+    int aging_val = ds3231.getAging();
+    if (dac_available) {
+      // VCOCXO pre-empts aging
+      aging_val = dac_get_value();
+    }
+    itoa(aging_val, s + 2, 10);
     display.print(s);
     display.print("   ");
 
@@ -986,8 +995,11 @@ void print_registers_fancy(uint8_t *registers) {
 #define DAC_I2C_ADDRESS 0x60
 
 Adafruit_MCP4728 mcp;
-bool dac_available = false;
-int dac_a_value = 1500;  // about 20 counts per (us per 100s, or 1e-8), so 2 counts = 1ppb
+// dac_available pre-declared above.
+//bool dac_available = false;
+time_t dac_changed_time = 0;
+int dac_a_value_saved = 0;  // When dac_a_value differs from this, we assume value is not saved.
+int dac_a_value = 0;  // about 20 counts per (us per 100s, or 1e-8), so 2 counts = 1ppb
 // for 10^7-1 counts per sec, DAC=1892 ended up 1.3 ppb fast
 // for 10^7 counts per sec, DAC=2056 was pretty flat
 // 2024-01-28: After 40h, clock reported -2.20 ppb (i.e, fast), so reduced DAC to 2053.
@@ -997,12 +1009,25 @@ void dac_set_value(int value) {
   if (dac_available) {
     dac_a_value = value;
     mcp.setChannelValue(MCP4728_CHANNEL_A, dac_a_value);
+    dac_changed_time = ds3231_unixtime();
   }
+}
+
+void dac_delta(int delta) {
+  // Modify DAC value by delta.
+  dac_set_value(dac_a_value + delta);
+}
+
+int dac_get_value(void) {
+  return dac_a_value;
 }
 
 void dac_save_to_eeprom(void) {
   if (dac_available) {
     mcp.saveToEEPROM();
+    Serial.print("DAC EEPROM write ");
+    Serial.println(dac_a_value);
+    dac_a_value_saved = dac_a_value;
   }
 }
 
@@ -1015,9 +1040,18 @@ void setup_dac(void) {
     dac_available = true;
     // Read back the current value of DAC A, we assume as set from EEPROM.
     dac_a_value = mcp.getChannelValue(MCP4728_CHANNEL_A);
+    dac_a_value_saved = dac_a_value;
   }
 }
 
+void update_dac(void) {
+  if (dac_a_value != dac_a_value_saved) {
+    // Wait a minute after any DAC change before updating the EEPROM, to minimize writes.
+    if (ds3231_unixtime() > dac_changed_time + 60) {
+      dac_save_to_eeprom();
+    }
+  }
+}
 
 // -------------------
 // Logger
@@ -1726,6 +1760,7 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm = 1) {
 }
 
 void cmd_prompt() {
+  serial_print_progname();
   Serial.println("***Cmd: Ann/Bx/Cx/D/Ex/Ix/Lxxx/Mxxx/Px/Qx/R/Sx/T1/Zxxx");
   //Serial.flush();
 }
@@ -1846,7 +1881,7 @@ void handle_cmd(char cmd, char *arg) {
         dac_set_value(atoi(arg));
       }
       Serial.print("DAC A value=");
-      Serial.println(dac_a_value);
+      Serial.println(dac_get_value());
       break;
 
     case 'K':
@@ -2832,8 +2867,13 @@ bool check_alarm_match(DateTime &now, DateTime &alarm, uint8_t alarm_mode) {
 }
 
 void ds3231_delta_aging(int delta) {
-  registers[DS3231_AGING] = (delta + (int8_t)registers[DS3231_AGING]);
-  registers_next[DS3231_AGING] = registers[DS3231_AGING];
+  if (dac_available) {
+    // Aging is pre-empted to modify the VCOCXO if it's there.
+    dac_delta(delta);
+  } else {
+    registers[DS3231_AGING] = (delta + (int8_t)registers[DS3231_AGING]);
+    registers_next[DS3231_AGING] = registers[DS3231_AGING];
+  }
 }
 
 #ifdef ARDUINO_ARCH_RP2040
@@ -3195,6 +3235,13 @@ void open_serial(int baudrate = 9600) {
   delay(1000);
 }
 
+void serial_print_progname(void) {
+  Serial.print(F("DS3231_emu_exp "));
+  Serial.print(__DATE__);
+  Serial.print(" ");
+  Serial.println(__TIME__);
+}
+
 void setup() {
 #ifdef ARDUINO_ARCH_RP2040
   // Configure Pico RP2040 I2C
@@ -3224,10 +3271,7 @@ void setup() {
 
   open_serial();
 
-  Serial.print(F("DS3231_emu_exp "));
-  Serial.print(__DATE__);
-  Serial.print(" ");
-  Serial.println(__TIME__);
+  serial_print_progname();
 
   INT_I2C.begin();
   Serial.println("about to setup_display...");
@@ -3342,6 +3386,7 @@ void loop() {
   // Maybe sleep display
   sleep_update();
 
+  update_dac();
 
   delay(polling_interval);
 }
