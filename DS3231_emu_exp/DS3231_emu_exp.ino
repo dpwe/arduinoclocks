@@ -1036,11 +1036,12 @@ void setup_dac(void) {
     Serial.println("Failed to find MCP4728 chip");
     dac_available = false;
   } else {
-    Serial.println("MCP4728 DAC initialized");
     dac_available = true;
     // Read back the current value of DAC A, we assume as set from EEPROM.
     dac_a_value = mcp.getChannelValue(MCP4728_CHANNEL_A);
     dac_a_value_saved = dac_a_value;
+    Serial.print("MCP4728 DAC initialized. DAC_A=");
+    Serial.println(dac_a_value);
   }
 }
 
@@ -3131,7 +3132,10 @@ void buttons_update(void) {
         if (long_press) {
           dac_save_to_eeprom();
         } else {
-          ds3231_delta_aging(1);
+          if (display_mode == 0) {
+            // Only respond to aging updates if aging is visible (display mode 0).
+            ds3231_delta_aging(1);
+          }
         }
         break;
       case 2:
@@ -3143,7 +3147,10 @@ void buttons_update(void) {
           Serial.print(" last_gps_micros=");
           Serial.println(last_gps_micros);
         } else {
-          ds3231_delta_aging(-1);
+          if (display_mode == 0) {
+            // Only respond to aging updates if aging is visible (display mode 0).
+            ds3231_delta_aging(-1);
+          }
         }
         break;
     }
