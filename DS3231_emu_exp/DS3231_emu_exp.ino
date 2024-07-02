@@ -41,6 +41,7 @@
 // T - Report most recent temp measurement
 // T1 - Initiate a new temperature conversion
 // Vxxx - Set predelay trim in us.  Larger = sync earlier.
+// W - Report the current ppb value.
 // Xnnn - Set/read display sleep timeout secs. 0=no display sleep.
 // Y - sync to GPS
 // Z - Read date/time
@@ -450,14 +451,51 @@ bool gps_active = false;
 long int secs_since_sync = 0;
 const long int settle_time_since_sync = 20;  // wait this long before tracking difference in ppb. 
 
+// forward decl to logger.
+bool get_oldest_data(int *pdata, time_t *ptime);
+// Predeclare
+#define time_t uint32_t
+time_t ds3231_unixtime(void);
+
+bool get_ppb(long int *p_ppb_times_100, bool verbose = false) {
+  // Calculates ppb * 100.
+  long int ppb_times_100 = 0;
+  if (secs_since_sync <= settle_time_since_sync) {
+    // No value to report.
+    return false;
+  }
+  long int my_secs_since_sync = secs_since_sync;
+  long int my_initial_skew_us = initial_skew_us;
+  // Maybe use the logger.
+  int log_data;
+  time_t log_time;
+  // Use the oldest available log data as long as it's at least 5 min old.
+  if (get_oldest_data(&log_data, &log_time)
+      && log_time < (ds3231_unixtime() - 300)) {
+    my_secs_since_sync = ds3231_unixtime() - log_time;
+    my_initial_skew_us = log_data;
+    if (verbose) {
+      Serial.print("get_ppb: using logger baseval ");
+      Serial.println(log_data);
+    }
+  }
+  ppb_times_100 = (100000L * (skew_us - my_initial_skew_us)) / (my_secs_since_sync - settle_time_since_sync);
+  if (verbose) {
+    Serial.print("get_ppb: ppb * 100 = ");
+    Serial.println(ppb_times_100);
+  }
+  *p_ppb_times_100 = ppb_times_100;
+  return true;
+}
+
 void draw_ppb(int x, int y, bool break_line=false) {
   // Print the PPB to the current text cursor position.
   // Figure PPB
   // if long int is 32 bit, then largest value is ~2e9, so numerator will overflow
   // when skew_us is 2e4 or 20 ms.
-  if (secs_since_sync > settle_time_since_sync) {
+  long int ppb_times_100;
+  if(get_ppb(&ppb_times_100)) {
     char s[12];
-    long int ppb_times_100 = (100000L * (skew_us - initial_skew_us)) / (secs_since_sync - settle_time_since_sync);
     display.setCursor(x * CHAR_W, y * ROW_H);
     display.print("ppb: ");
     if (break_line)
@@ -741,8 +779,6 @@ void display_skew_us(long int skew_microseconds, int x, int y) {
 #define DS3231_TEMPERATUREREG 0x11  ///< Temperature register (high byte - low byte is at 0x12), 10-bit \
                                     ///< temperature value
 
-#define time_t uint32_t
-
 RTC_DS3231 ds3231;
 
 void sprint_datetime(const DateTime &dt, char *s) {
@@ -756,9 +792,6 @@ void serial_print_time(const DateTime &dt) {
   sprint_datetime(dt, s);
   Serial.println(s);
 }
-
-// Predeclare
-time_t ds3231_unixtime(void);
 
 // getExternalTime is declared to expect a function returning a (signed) long int.
 //time_t
@@ -1109,6 +1142,20 @@ void update_most_recent_data(int new_data) {
   if (log_times[LOG_DATA_LEN - 1] != INVALID_TIME) {
     log_data[LOG_DATA_LEN - 1] = new_data;
   }
+}
+
+bool get_oldest_data(int *pdata, time_t *ptime) {
+  // Fills in pointers with earliest available data.
+  // If no data available, returns False.
+  for (int i = 0; i < LOG_DATA_LEN; ++i) {
+    if (log_times[i] != INVALID_TIME) {
+      // We found the earliest valid data.
+      *pdata = log_data[i];
+      *ptime = log_times[i];
+      return true;
+    }
+  }
+  return false;  // No data available.
 }
 
 void push_data(int new_data, time_t new_time) {
@@ -1762,7 +1809,7 @@ DateTime parse_alarm_spec(char *arg, uint8_t *pmode, uint8_t alarm = 1) {
 
 void cmd_prompt() {
   serial_print_progname();
-  Serial.println("***Cmd: Ann/Bx/Cx/D/Ex/Ix/Lxxx/Mxxx/Px/Qx/R/Sx/T1/Zxxx");
+  Serial.println("***Cmd: Ann/Bx/Cx/D/Ex/Ix/Lxxx/Mxxx/Px/Qx/R/Sx/T1/W/Zxxx");
   //Serial.flush();
 }
 
@@ -2018,6 +2065,16 @@ void handle_cmd(char cmd, char *arg) {
       Serial.println(predelay_trim_us);
       Serial.print("skew_us=");
       Serial.println(skew_us);
+      break;
+
+    case 'W':
+      // To query the PPB, mostly to debug if it's using the logger.
+      {
+        long int ppb_times_100 = 0;
+        get_ppb(&ppb_times_100, /* verbose= */true);   // verbose makes it print basis to terminal.
+        Serial.print("GetPPB: ppb * 100 = ");
+        Serial.println(ppb_times_100);
+      }
       break;
 
     case 'X':
