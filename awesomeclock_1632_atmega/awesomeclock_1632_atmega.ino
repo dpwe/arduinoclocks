@@ -58,10 +58,12 @@ class DS3231
 {
   public:
     bool begin(void);
-    Time  now();
+    Time now();
+    void set(Time t);
 
   private:
     static uint8_t bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
+    static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
 };
 
 boolean DS3231::begin(void) {
@@ -70,6 +72,33 @@ boolean DS3231::begin(void) {
 }
 
 #define CLOCK_ADDRESS 0x68
+
+#define DS3231_ADDRESS 0x68   ///< I2C address for DS3231
+#define DS3231_TIME 0x00      ///< Time register
+#define DS3231_ALARM1 0x07    ///< Alarm 1 register
+#define DS3231_ALARM2 0x0B    ///< Alarm 2 register
+#define DS3231_CONTROL 0x0E   ///< Control register
+#define DS3231_STATUSREG 0x0F ///< Status register
+#define DS3231_AGING 0x10     ///< Aging offset register
+#define DS3231_TEMPERATUREREG                                                  \
+  0x11 ///< Temperature register (high byte - low byte is at 0x12), 10-bit
+       ///< temperature value
+
+void i2c_dev_write(uint8_t *buf, int num) {
+  Wire.beginTransmission(CLOCK_ADDRESS);
+  for (int i = 0; i < num; ++i) {
+    Wire.write(buf[i]);
+  }
+  Wire.endTransmission();
+}
+
+void i2c_dev_read(uint8_t *buf, int num) {
+  Wire.requestFrom(CLOCK_ADDRESS, num);
+  for(int i = 0; i < num; ++i) {
+     buf[i] = Wire.read();
+  }
+}
+
 Time DS3231::now()
 {
   // Directly read the first 8 values from the RTC chip
@@ -85,6 +114,52 @@ Time DS3231::now()
   return Time(bcd2bin(buffer[6]) + 2000U, bcd2bin(buffer[5] & 0x7F),
               bcd2bin(buffer[4]), bcd2bin(buffer[2]), bcd2bin(buffer[1]),
               bcd2bin(buffer[0] & 0x7F));
+}
+
+uint8_t read_register(uint8_t reg) {
+  uint8_t buffer[1];
+  i2c_dev_write(&reg, 1);
+    i2c_dev_read(buffer, 1);
+  return buffer[0];
+}
+
+void write_register(uint8_t reg, uint8_t val) {
+  uint8_t buffer[2] = {reg, val};
+  i2c_dev_write(buffer, 2);
+}
+
+void read_registers(uint8_t reg, uint8_t* buffer, uint8_t num) {
+  // Put register index in first byte of buffer, overwritten on read.
+  //buffer[0] = reg;
+  //i2c_dev->write_then_read(buffer, 1, buffer, num);
+  i2c_dev_write(&reg, 1);
+  i2c_dev_read(buffer, num);
+}
+
+void write_registers(uint8_t reg, const uint8_t* buffer, uint8_t num) {
+  uint8_t my_buffer[20];
+  //assert(num <= 19);
+  // We need to assemble a single buffer with reg followed by payload.
+  my_buffer[0] = reg;
+  for (int i = 0; i < num; ++i) {
+    my_buffer[1 + i] = buffer[i];
+  }
+  i2c_dev_write(my_buffer, num + 1);
+}
+
+void DS3231::set(Time t) {
+  uint8_t buffer[7] = {bin2bcd(t.sec),
+                       bin2bcd(t.min),
+                       bin2bcd(t.hour),
+                       0, // bin2bcd(dowToDS3231(dt.dayOfTheWeek())),
+                       bin2bcd(t.date),
+                       bin2bcd(t.month),
+                       bin2bcd(t.year - 2000U)};
+  write_registers(DS3231_TIME, buffer, 7);
+  
+  uint8_t statreg = read_register(DS3231_STATUSREG);
+  statreg &= ~0x80; // flip OSF bit
+  write_register(DS3231_STATUSREG, statreg);
 }
 
 // ----------------------------------------
@@ -185,8 +260,6 @@ void rtc_setup() {
 // ---------------------------------
 
 void matrix_setup() {
-  Serial.begin(9600);
-  Serial.println("** awesomeclock_1632_atmega **");
   matrix.begin(HT1632_COMMON_16NMOS);  
   matrix.clearScreen();
   matrix.setBrightness(0);
@@ -290,6 +363,129 @@ void backlight_update(int hour) {
   }
 }
 
+// -------------------------------------------------------------------
+// Input commands over serial line
+
+void cmd_setup(void) {
+  // Nothing to do?
+}
+
+byte atoi2(char *s) {
+  // Convert two ascii digits to a uint8.
+  return (s[1] - '0') + 10 * (s[0] - '0');
+}
+
+uint32_t htoi(char *s) {
+  // Convert hex string to long int.
+  uint32_t val = 0;
+  while(*s) {
+    uint8_t v = (*s) - '0';
+    if (v > 9) v -= 'A' - '0' + 10;
+    if (v > 15) v -= 'a' - 'A';
+    ++s;
+    val = (val << 4) + v;
+  }
+  return val;
+}
+
+int parse_string_to_mins(char *mins_string) {
+  // Convert a string like "2359" into minutes since midnight (1439 in this case)
+  if (strlen(mins_string) != 4) {
+    Serial.println("Error: cmd arg string is not 4 chrs.");
+    return -1;
+  }
+  int hours = atoi2(mins_string);
+  int minutes = atoi2(mins_string + 2);
+  return 60 * hours + minutes;
+}
+
+Time parse_time_string(char *time_string) {
+  // time_string must point to exactly 14 chars in format YYYYMMDDHHMMSS.
+  Time t;
+  if (time_string[0] != '2' or time_string[1] != '0') {
+    Serial.println("Warn: Year does not start with 20...");
+  }
+  t.year = 2000 + atoi2(time_string + 2);
+  t.month = atoi2(time_string + 4);
+  t.date = atoi2(time_string + 6);
+  t.hour = atoi2(time_string + 8);
+  t.min = atoi2(time_string + 10);
+  t.sec = atoi2(time_string + 12);
+  return t;
+}
+
+void printDigits(int digits)
+{
+  // utility function for digital clock display: prints preceding colon and leading 0
+  if(digits < 10)
+    Serial.print('0');
+  Serial.print(digits);
+}
+
+void serial_print_tm(const Time t)
+{
+  Serial.print(t.year);
+  Serial.print("-");
+  printDigits(t.month);
+  Serial.print("-");
+  printDigits(t.date);
+  Serial.print(" ");
+  printDigits(t.hour);
+  Serial.print(":");
+  printDigits(t.min);
+  Serial.print(":");
+  printDigits(t.sec);
+  Serial.println();
+}
+
+#define CMD_BUF_LEN 32
+char cmd_buffer[CMD_BUF_LEN];
+int cmd_len = 0;
+
+bool enable_rtc_updates = true;
+
+void cmd_update(void) {
+  int value;
+  while (Serial.available() > 0) {
+    // read the incoming byte:
+    char new_char = Serial.read();
+    if (new_char == '\n' || new_char == '\r') {
+      // handle command.
+      cmd_buffer[cmd_len] = '\0';
+      if (cmd_len > 0) {
+        byte cmd0 = cmd_buffer[0];
+        if (cmd0 >= 'a')  cmd0 -= ('a' - 'A');
+        switch (cmd0) {
+          case 'A':
+            // Set aging offset.
+            value = atoi(cmd_buffer + 1);
+            //ds3231.setAgingOffset(value);
+            Serial.print("Aging offset=");
+            //Serial.println((int8_t)ds3231.getAgingOffset());
+            break;
+          case 'Z':
+            // Set date/time: Z20211118094000 - 2021-11-18 09:40:00.
+            Serial.println("Z command");
+            if (strlen(cmd_buffer) < 15) {
+              Serial.println("Bad format - Zyyyymmddhhmmss");
+            } else {
+              Time t = parse_time_string(cmd_buffer + 1); 
+              rtc.set(t);
+              Serial.println("Time set.");
+            }
+            serial_print_tm(rtc.now());
+            break;
+        }
+      }
+      cmd_len = 0;
+    } else {
+      if (cmd_len < CMD_BUF_LEN) {
+        cmd_buffer[cmd_len++] = new_char;
+      }
+    }
+  }
+}
+
 // ---------------------------------
 // Main
 // ---------------------------------
@@ -301,8 +497,19 @@ void setup() {
   // Run the Trinket at 16 MHz
   //if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
 
+  // initialize serial communication at 9600 bits per second.
+  Serial.begin(9600);
+
+  Serial.print("awesomeclock_1632_atmega ");
+  Serial.print(__DATE__);
+  Serial.print(" ");
+  Serial.println(__TIME__);
+  Serial.println("Post-reset settling...");
+  delay(200);
+
   rtc_setup();
   start = rtc.now();
+  serial_print_tm(start);
   start_ms = millis();
   //endless_flash(100, start.sec);
 
@@ -311,6 +518,7 @@ void setup() {
   pinMode(DATA, OUTPUT);
   matrix_setup();
   backlight_setup();
+  cmd_setup();
 }
 
 void wind_clock(Time &start) {
@@ -355,6 +563,8 @@ void loop() {
     matrix_update(now.hour, now.min, now.sec);
   }
   backlight_update(now.hour);
+
+  cmd_update();
   
   int millis_to_wait = 950 - (millis() - millis_start);
   delay(millis_to_wait);

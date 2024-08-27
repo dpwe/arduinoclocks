@@ -436,7 +436,7 @@ bool enable_rtc_updates = true;
 
 void cmd_update(void) {
   int value;
-  if (Serial.available() > 0) {
+  while (Serial.available() > 0) {
     // read the incoming byte:
     char new_char = Serial.read();
     if (new_char == '\n' || new_char == '\r') {
