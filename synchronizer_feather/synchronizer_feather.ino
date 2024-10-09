@@ -802,8 +802,8 @@ int temperature_get(void) {
 #ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
 #define DISPLAY_SH1107      // 128x64 mono OLED in Feather stack
 // Wire1 is the internal I2C on Feather RP2040
-#define WIRE_INTERNAL Wire1
-#define WIRE_EXTERNAL Wire
+#define WIRE_INTERNAL Wire
+#define WIRE_EXTERNAL Wire1
 #else
 #define DISPLAY_ST7789  // Built-in display on ESP32-S3 TFT
 //#define DISPLAY_SSD1351  // Exernal 128x128 RGB TFT

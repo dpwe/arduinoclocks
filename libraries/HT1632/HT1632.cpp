@@ -76,22 +76,31 @@ void HT1632LEDMatrix::drawPixel(uint8_t x, uint8_t y, uint8_t color) {
 
   uint16_t i;
 
-  if (x < 8) {
-    i = 7;
-  } else if (x < 16) {
-    i = 128 + 7;
-  } else {
-    i = 256 + 7;
-  }
-  i -= (x % 8);
+#ifdef ADAFRUIT_DISPLAY
+  if (x < 8)
+    i = 7;          // so i = 7 - x&7
+  else if (x < 16)
+    i = 128 + 7;    // so i = 128 + (7 - x&7)
+  else
+    i = 256 + 7;    // so i = 256 + (7 - x&7)
+  i -= (x & 7);
 
-  if (y < 8) {
-    y *= 2;
-  } else {
-    y = (y-8) * 2 + 1;
-  } 
-
+  if (y < 8)
+    y *= 2;  // so              i +=     16 * (y & 7)
+  else
+    y = (y - 8) * 2 + 1;  // so i += 8 + 16 * (y & 7)
   i += y * 8;
+
+#else // AliExpress display https://www.aliexpress.us/item/2251832766729843.html
+  i = 16 * (x & 7) + (y & 7);
+  if (x >= 16)
+    i += 256;
+  else if (x >= 8)
+    i += 128; 
+  if (y < 8)
+    i += 8; 
+  
+#endif
 
   if (color) 
     matrices[m].setPixel(i);
