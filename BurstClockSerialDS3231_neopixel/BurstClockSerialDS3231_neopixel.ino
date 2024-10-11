@@ -41,7 +41,7 @@
 //   Sxx - Execute some number of steps on the stepper motor, don't update internal state 
 //   Brrggbb - Set backlight color to RGB value in hex.
 
-#define GE74305
+//#define GE74305
 
 #ifdef GE74305
   #warning "Stepping for GE 7-4305"
@@ -448,8 +448,10 @@ void cmd_update(void) {
         switch (cmd0) {
           case 'A':
             // Set aging offset.
-            value = atoi(cmd_buffer + 1);
-            ds3231.setAgingOffset(value);
+            if (strlen(cmd_buffer) > 1) {
+              value = atoi(cmd_buffer + 1);
+              ds3231.setAgingOffset(value);
+            }
             Serial.print("Aging offset=");
             Serial.println((int8_t)ds3231.getAgingOffset());
             break;
@@ -490,11 +492,13 @@ void cmd_update(void) {
             add_steps(atoi(cmd_buffer + 1));
             break;
           case 'B':
-            // Set backlight color to RRGGBB in hex.
-            uint32_t color = htoi(cmd_buffer + 1);
-            set_backlight_color(color);
-            Serial.print("new color=");
-            Serial.println(color);
+            if (strlen(cmd_buffer) > 1) {
+              // Set backlight color to RRGGBB in hex.
+              uint32_t color = htoi(cmd_buffer + 1);
+              set_backlight_color(color);
+            }
+            Serial.print("backlight color=");
+            Serial.println(get_backlight_color());
             break;
         }
       }
@@ -699,13 +703,18 @@ void serial_print_datetime(const DateTime &dt)
 // pixels[1] and [2] are a pair either side of the whirlygig hole
 Adafruit_NeoPixel pixel(3 /* NUMPIXELS */, NEOPIXEL_LED_PIN, NEO_RGB + NEO_KHZ800);
 
-uint32_t backlight_color = 0x020203;  // blue-white // 0x060100;  // orange RGB
+//uint32_t backlight_color = 0x020203;  // blue-white
+uint32_t backlight_color = 0x060100;  // orange RGB
 
 void set_backlight_color(uint32_t val) {
   pixel.clear();
   pixel.setPixelColor(0, val);
   backlight_color = val;
   pixel.show();
+}
+
+int get_backlight_color(void) {
+  return backlight_color;
 }
 
 void neo_setup(void) {
