@@ -59,11 +59,14 @@
 //  10MHz in         GP7             D11  GP11       D11  GP11
 //  I2C server SDA   GP16/4 I2C0SDA  A4   GP24       A4   GP14
 //  I2C server SCL   GP17/5 I2C0SCL  A5   GP25       A5   GP8
+//  (RTC SQWV PPSin) GP9             A3   GP29       A3   GP15  
 //  RTC PPS out      GP13+GP25       D13  GP13       D13  GP13
 //  GPS PPS in       GP8/6           A2   GP28       A2   GP16
 //  GPS Serial in    GP5/9 UART1RX   RX   GP1        RX   GP2
 //  I2C display SDA  GP2  I2C1SDA    SDA  GP2        (built-in)
 //  I2C display SCL  GP3  I2C1SCL    SCL  GP3        (built-in)
+
+// Also supports ext_DS3231 on ext I2C (e.g. A4/A5) and SQWV_PPS on A3.  Auto selects if no 10 MHz on expected input pin.
 
 //  ST7920 LCD RST   GP16
 //  ST7920 LCD CS/RS GP17                 GP0
@@ -107,12 +110,16 @@
 #ifdef ARDUINO_ARCH_RP2040
   #ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
     #define FEATHER_RP2040
-    //#define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
-    //#define FEATHER_OLED    // Different address than ext OLED.
-    #define DISPLAY_ST7920    // {128,192}x64 green-yellow LCD matrix
-    //#define SCREEN_WIDTH 128
-    #define SCREEN_WIDTH 192
-    #define EXT_I2C Wire1     // Feather has reorderd the I2C pins to look right to Arduino users
+    //#define YELLOWGREEN_LCD
+    #ifdef YELLOWGREEN_LCD
+      #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
+      #define SCREEN_WIDTH 192
+    #else
+      #define DISPLAY_SH1107  // 128x(64,128) mono OLED in Feather stack
+      #define SCREEN_WIDTH 128
+      #define FEATHER_OLED    // Different address than ext OLED.
+    #endif
+    #define EXT_I2C Wire1  // Feather has reorderd the I2C pins to look right to Arduino users
     #define INT_I2C Wire
     // Initialize Aging specifically for Feather RP2040 with mini Connor OCXO
     #define INITIAL_DS3231_AGING 35
@@ -161,6 +168,7 @@
   #define SCREEN_WIDTH 128
   #define SCREEN_HEIGHT 128  // Change this to 96 for 1.27" OLED.
   #define SIZE_1X
+  #define DEFAULT_SLEEP 300
   // Hardware SPI pins
   // (for UNO thats sclk = 13 and sid = 11) and pin 10 must be
   // an output.
@@ -185,6 +193,7 @@
   #define SCREEN_WIDTH 240
   #define SCREEN_HEIGHT 135  // Change this to 96 for 1.27" OLED.
   #define SIZE_2X            // All text double-size
+  #define DEFAULT_SLEEP 300
 
   // Use dedicated hardware SPI pins
   Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
@@ -219,6 +228,7 @@
 
   #define SCREEN_WIDTH 128
   #define SIZE_1X
+  #define DEFAULT_SLEEP 300
 
   Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_HEIGHT, SCREEN_WIDTH, &INT_I2C);
 
@@ -236,6 +246,8 @@
   // ST7920 needs display.display() after drawing
   #define DISPLAY_DISPLAY_CMD
   #define SIZE_1X
+  // Sleep disabled by default
+  #define DEFAULT_SLEEP 0
 
   // Backlight pin
   #define DISPLAY_BACKLIGHT
@@ -254,7 +266,7 @@
   const int CLK1_PIN = 18;
   // 192-column ST7920 uses a second CLK pin
   const int CLK2_PIN = 6;
-  //  ST7920 LCD RST       [ora]   
+  //  ST7920 LCD RST       [ora]
   //  ST7920 LCD CS (RS)   [ylw]   GP17
   //  ST7920 LCD SCLK1(E1) [blu]   GP18
   //  ST7920 LCD SCLK2(E2) [pur]   GP06
@@ -449,7 +461,7 @@ void itoa2(int num, char *s, int base = 10) {
 bool gps_active = false;
 
 long int secs_since_sync = 0;
-const long int settle_time_since_sync = 20;  // wait this long before tracking difference in ppb. 
+const long int settle_time_since_sync = 20;  // wait this long before tracking difference in ppb.
 
 // forward decl to logger.
 bool get_oldest_data(int *pdata, time_t *ptime);
@@ -488,18 +500,18 @@ bool get_ppb(long int *p_ppb_times_100, bool verbose = false) {
   return true;
 }
 
-void draw_ppb(int x, int y, bool break_line=false) {
+void draw_ppb(int x, int y, bool break_line = false) {
   // Print the PPB to the current text cursor position.
   // Figure PPB
   // if long int is 32 bit, then largest value is ~2e9, so numerator will overflow
   // when skew_us is 2e4 or 20 ms.
   long int ppb_times_100;
-  if(get_ppb(&ppb_times_100)) {
+  if (get_ppb(&ppb_times_100)) {
     char s[12];
     display.setCursor(x * CHAR_W, y * ROW_H);
     display.print("ppb: ");
     if (break_line)
-        display.setCursor(x * CHAR_W, (y + 1) * ROW_H);
+      display.setCursor(x * CHAR_W, (y + 1) * ROW_H);
     if (ppb_times_100 < 0) {
       display.print("-");
       ppb_times_100 = -ppb_times_100;
@@ -516,7 +528,7 @@ void draw_ppb(int x, int y, bool break_line=false) {
   }
 }
 
-void display_gps_status(int x, int y, bool include_ppb=false, bool include_skew=true) {
+void display_gps_status(int x, int y, bool include_ppb = false, bool include_skew = true) {
   // GPS status
   display.setFont();
   display.setCursor((x + 1) * CHAR_W, y * ROW_H);
@@ -798,7 +810,8 @@ void serial_print_time(const DateTime &dt) {
 #ifdef ARDUINO_ARCH_RP2040  // Needed to compile on M4
 long
 #endif
-long int RTC_utc_get(void) {
+  long int
+  RTC_utc_get(void) {
   return ds3231_unixtime();
 }
 
@@ -1032,7 +1045,7 @@ Adafruit_MCP4728 mcp;
 //bool dac_available = false;
 time_t dac_changed_time = 0;
 int dac_a_value_saved = 0;  // When dac_a_value differs from this, we assume value is not saved.
-int dac_a_value = 0;  // about 20 counts per (us per 100s, or 1e-8), so 2 counts = 1ppb
+int dac_a_value = 0;        // about 20 counts per (us per 100s, or 1e-8), so 2 counts = 1ppb
 // for 10^7-1 counts per sec, DAC=1892 ended up 1.3 ppb fast
 // for 10^7 counts per sec, DAC=2056 was pretty flat
 // 2024-01-28: After 40h, clock reported -2.20 ppb (i.e, fast), so reduced DAC to 2053.
@@ -1096,7 +1109,7 @@ const int SECS_PER_DAY = 24 * 60 * 60;
 const int LOG_DATA_LEN = SCREEN_WIDTH;                   // One value per pixel.
 const int LOG_INTERVAL_SECS = 20 * 60;                   // Seconds between each logged value. 12 min x 120 vals = 1440 mins (24 h).
 const int LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
-const int SUBDIV_SECS = 6 * 60 * 60; //(30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
+const int SUBDIV_SECS = 6 * 60 * 60;                     //(30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
 
 int log_data[LOG_DATA_LEN];
 time_t log_times[LOG_DATA_LEN];
@@ -1229,6 +1242,7 @@ void setup_logger(void) {
   #define CalBlk36 &CalBlk3612pt7b
 #endif
 #if SCREEN_HEIGHT == 64
+  #warning "screen_height 64"
   const int16_t overall_top_y = 0;
   const int16_t date_midline_y = overall_top_y + 3;
   const int16_t time_midline_y = overall_top_y + 25;
@@ -1236,7 +1250,7 @@ void setup_logger(void) {
   const int16_t log_top_y = overall_top_y + 43;
   const int16_t log_width = SCREEN_WIDTH;
   const int16_t log_height = 21;
-  const int16_t display_mid_x = SCREEN_WIDTH / 2 - 12 * (SCREEN_WIDTH==192);
+  const int16_t display_mid_x = SCREEN_WIDTH / 2 - 12 * (SCREEN_WIDTH == 192);
   const int8_t secs_x_scale = 2;
   const int8_t secs_height = 2;
   #include <Fonts/CalBlk36.h>
@@ -1435,8 +1449,8 @@ void draw_log_output(int x, int y, int w, int h) {
           // Don't draw if it's going to splay off the left.
           if (vert_line_legend_x >= data_x) {
             time_t legend_time_secs = subdiv * SUBDIV_SECS;
-            draw_time_of_day(vert_line_legend_x, y - 1 + MICROFONT_H, legend_time_secs, 
-                      /* show_minutes= */ (legend_time_secs % 3600) != 0);
+            draw_time_of_day(vert_line_legend_x, y - 1 + MICROFONT_H, legend_time_secs,
+                             /* show_minutes= */ (legend_time_secs % 3600) != 0);
           }
         }
         last_subdiv = subdiv;
@@ -1553,14 +1567,12 @@ void calc_timechange_days(int year) {
 
 time_t make_localtime(time_t utc) {
   DateTime now(utc);
-  if (now.year() > 2010) {   // Skip if utc is degenerate i.e. not sync'd
-    if (dst_cache_year != now.year())  calc_timechange_days(now.year());
+  if (now.year() > 2010) {  // Skip if utc is degenerate i.e. not sync'd
+    if (dst_cache_year != now.year()) calc_timechange_days(now.year());
     // 2am local in North America is 2am + 4/5 in UTC
     int DoY = day_of_year(now.year() - 2000, now.month(), now.day());
-    bool sprung_forward = (DoY > dst_start_day) ||
-                          ((DoY == dst_start_day) && (now.hour() >= 2 - STANDARD_TIME_DIFF_HOURS));
-    bool fallen_back = (DoY > dst_end_day) ||
-                        ((DoY == dst_end_day) && (now.hour() >= 2 - (STANDARD_TIME_DIFF_HOURS + 1)));  // offset is DST
+    bool sprung_forward = (DoY > dst_start_day) || ((DoY == dst_start_day) && (now.hour() >= 2 - STANDARD_TIME_DIFF_HOURS));
+    bool fallen_back = (DoY > dst_end_day) || ((DoY == dst_end_day) && (now.hour() >= 2 - (STANDARD_TIME_DIFF_HOURS + 1)));  // offset is DST
     bool is_dst = sprung_forward - fallen_back;
     utc += 3600 * (STANDARD_TIME_DIFF_HOURS + is_dst);
   }
@@ -1661,7 +1673,7 @@ int logger_display(time_t t, uint8_t redraw = false) {
     draw_log_output((SCREEN_WIDTH >> 1) - (log_width >> 1), log_top_y, log_width, log_height);
   }
 
-#if SCREEN_WIDTH==192
+#if SCREEN_WIDTH == 192
   display_gps_status(25, 0, /*include_ppb=*/true);
 #else
   display_gps_status(19, 0, /*include_ppb=*/false, /*include_skew=*/false);  // just "G" or nothing.
@@ -1828,9 +1840,7 @@ bool request_RTC_sync = false;
 bool record_GPS_uptime = false;
 
 // Predeclare display timeout val.
-//uint32_t display_sleep_timeout_secs = 300;
-// No display timeout by default for LCD matrix output.
-uint32_t display_sleep_timeout_secs = 0;
+uint32_t display_sleep_timeout_secs = DEFAULT_SLEEP;
 
 // Do we set the time when GPS is newly detected?
 bool set_time_on_gps_sync = true;
@@ -2071,7 +2081,7 @@ void handle_cmd(char cmd, char *arg) {
       // To query the PPB, mostly to debug if it's using the logger.
       {
         long int ppb_times_100 = 0;
-        get_ppb(&ppb_times_100, /* verbose= */true);   // verbose makes it print basis to terminal.
+        get_ppb(&ppb_times_100, /* verbose= */ true);  // verbose makes it print basis to terminal.
         Serial.print("GetPPB: ppb * 100 = ");
         Serial.println(ppb_times_100);
       }
@@ -2154,55 +2164,106 @@ void cmd_update(void) {
     #warning "pps pin GP8"
   #endif
 #else
-  const int ppsPin = A2;  // PPS output from GPS board
+  const int ppsPin = A2;                                                       // PPS output from GPS board
   #warning "pps pin A2"
 #endif
 
+const int sqwvPin = A3;  // PPS input from DS3231 - only used if 10MHz not detected.
+
 volatile uint32_t gps_micros = 0;
+volatile uint32_t sqwv_micros = 0;
+
+// Forward decls so ext ds3231 sqwv can contribute tics
+bool tick_from_sqwv = false;
+// Detect a tick in foreground.
+volatile bool tick_happened = false;
+// Interrupt-updated micros() at last tick (to help interface with explorer).
+volatile uint32_t tick_micros = 0;
+
+// Track whether we have a low pulse on sqwv that needs clearing.
+volatile uint32_t last_sqwv_millis = 0;
+
+// Emit SQWV on LED pin.
+#ifdef MY_PICO_RP2040
+  #define SQWV_PIN_RP2040 25  // On-board LED on Pico, run in parallel.
+#endif
+#define SQWV_PIN 13
 
 //#ifdef ARDUINO_ARCH_RP2040
 #ifdef MY_PICO_RP2040
-//#ifdef NOTDEF
+  //#ifdef NOTDEF
 
-#warning "RP2040 interrupts"
+  #warning "RP2040 interrupts"
 
-unsigned long my_micros(void) {
-  return timer_hw->timelr;
-}
-
-void gpio_transition() {
-  unsigned long now_micros = timer_hw->timelr;
-
-  if (gpio_get_irq_event_mask(ppsPin)) {
-    gps_micros = now_micros;
-    gpio_acknowledge_irq(ppsPin, IO_IRQ_BANK0);
+  unsigned long my_micros(void) {
+    return timer_hw->timelr;
   }
-}
 
-void setup_interrupts(void) {
-  irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
-  // GPS PPS pin samples on rise.
-  gpio_set_irq_enabled(ppsPin, GPIO_IRQ_EDGE_RISE, true);
-  //irq_set_priority(IO_IRQ_BANK0, 0);
-  irq_set_enabled(IO_IRQ_BANK0, true);
-}
+  void gpio_transition() {
+    unsigned long now_micros = timer_hw->timelr;
+
+    if (gpio_get_irq_event_mask(ppsPin)) {
+      gps_micros = now_micros;
+      gpio_acknowledge_irq(ppsPin, IO_IRQ_BANK0);
+    }
+    if (gpio_get_irq_event_mask(rtc_sqwv_pps)) {
+      sqwv_micros = now_micros;
+      if (tick_from_sqwv) {
+        // ext SQWV also sets the internal tick time.
+        tick_micros = now_micros;
+        last_sqwv_millis = millis();
+        tick_happened = true;
+        digitalWrite(SQWV_PIN, LOW);  // LED on.
+  #ifdef SQWV_PIN_RP2040
+        digitalWrite(SQWV_PIN_RP2040, LOW);
+  #endif
+      }
+      gpio_acknowledge_irq(sqwvPin, IO_IRQ_BANK0);
+    }
+  }
+
+  void setup_interrupts(void) {
+    irq_set_exclusive_handler(IO_IRQ_BANK0, gpio_transition);
+    // GPS PPS pin samples on rise.
+    gpio_set_irq_enabled(ppsPin, GPIO_IRQ_EDGE_RISE, true);
+    gpio_set_irq_enabled(sqwvPin, GPIO_IRQ_EDGE_FALL, true);
+    //irq_set_priority(IO_IRQ_BANK0, 0);
+    irq_set_enabled(IO_IRQ_BANK0, true);
+  }
 #else  // !RP2040
 
-// Use Arduino interrupt handler (longer latency, more portable)
-#warning "Arduino interrupts"
+  // Use Arduino interrupt handler (longer latency, more portable)
+  #warning "Arduino interrupts"
 
-void gps_mark_isr(void) {
-  unsigned long now_micros = micros();
-  gps_micros = now_micros;
-}
+  void gps_mark_isr(void) {
+    unsigned long now_micros = micros();
+    gps_micros = now_micros;
+  }
 
-void setup_interrupts() {
-  // GPS mark is on rising edge.
-  pinMode(ppsPin, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
-}
+  void sqwv_mark_isr(void) {
+    unsigned long now_micros = micros();
+    sqwv_micros = now_micros;
+    if (tick_from_sqwv) {
+      // ext SQWV also sets the internal tick time.
+      tick_micros = now_micros;
+      last_sqwv_millis = millis();
+      tick_happened = true;
+      digitalWrite(SQWV_PIN, LOW);  // LED on.
+  #ifdef SQWV_PIN_RP2040
+      digitalWrite(SQWV_PIN_RP2040, LOW);
+  #endif
+    }
+  }
 
-#define my_micros micros
+  void setup_interrupts() {
+    // GPS mark is on rising edge.
+    pinMode(ppsPin, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(ppsPin), gps_mark_isr, RISING);
+    pinMode(sqwvPin, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(sqwvPin), sqwv_mark_isr, FALLING);
+  }
+
+  #define my_micros micros
 
 #endif  // !RP2040
 
@@ -2262,7 +2323,16 @@ time_t gps_unixtime(void) {
 
 void sync_time_from_GPS(void) {
   // This is called soon after an A1 transition is detected, so GPS unixtime is still current.
-  Serial.println("sync_time_from_gps");
+  Serial.println("sync_time_from_gps:");
+  unsigned long time, age_millis;
+  gps.get_datetime(0, &time, &age_millis);
+  Serial.print("age_millis=");
+  Serial.println(age_millis);
+  unsigned long last_time_fix = millis() - age_millis;
+  Serial.print("millis=");
+  Serial.println(millis());
+  Serial.print("last_time_fix_millis=");
+  Serial.println(last_time_fix);
   if (gps_time_valid(gps)) {
     Serial.println("gps_time_valid");
     // We can assume that the last-stored time from the GPS messages is the second *preceeding* this mark,
@@ -2278,7 +2348,9 @@ void sync_time_from_GPS(void) {
 #endif
     delayMicroseconds(PREDELAY - predelay_trim_us - (my_micros() - gps_micros));
     last_gps_sync_unixtime = gps_now(gps).unixtime() + 2;
-    RTC_set_time(DateTime(last_gps_sync_unixtime));
+    DateTime dt = DateTime(last_gps_sync_unixtime);
+    RTC_set_time(dt);
+    serial_print_time(dt);
   }
 }
 
@@ -2298,6 +2370,7 @@ void setup_GPS_serial(void) {
   #else
     SerialGPS.setRX(1);
     SerialGPS.setTX(0);
+    #warning "GPS Serial in on 1"
   #endif
   SerialGPS.begin(9600);
 #else
@@ -2307,10 +2380,10 @@ void setup_GPS_serial(void) {
 }
 
 // Keep two copies of the latest gps_msg so we can retain the last complete one.
-#define GPS_MSG_BUF_LEN 128
+#define GPS_MSG_BUF_LEN 1024
 char gps_msg_buf[2][GPS_MSG_BUF_LEN];
 int gps_msg_buf_current = 0;
-int gps_msg_chars[2] = {0, 0};
+int gps_msg_chars[2] = { 0, 0 };
 
 char *last_gps_msg(void) {
   int last_buf = 1 - gps_msg_buf_current;
@@ -2320,10 +2393,11 @@ char *last_gps_msg(void) {
 }
 
 void update_GPS_serial(void) {
+  int result = 0;
   while (SerialGPS.available()) {
     char c = SerialGPS.read();
     //Serial.print(c);
-    gps.encode(c);
+    result = gps.encode(c);
     // Keep our own copy of the string outside the buffer, for debug.
     if (c == '\r' || c == '\n') {
       // Newline.  Swap buffers if there's anything in the current buffer.
@@ -2332,11 +2406,33 @@ void update_GPS_serial(void) {
         // Reset the new-current buffer pos.
         gps_msg_chars[gps_msg_buf_current] = 0;
       }
-    } else if (gps_msg_chars[gps_msg_buf_current] < GPS_MSG_BUF_LEN - 1) {
+    } else if (gps_msg_chars[gps_msg_buf_current] < GPS_MSG_BUF_LEN - 2) {
       gps_msg_buf[gps_msg_buf_current][gps_msg_chars[gps_msg_buf_current]] = c;
+      gps_msg_buf[gps_msg_buf_current][gps_msg_chars[gps_msg_buf_current] + 1] = '\0';
       ++gps_msg_chars[gps_msg_buf_current];
     }
   }
+//#define DEBUG_GPS
+#ifdef DEBUG_GPS
+  if (result) {
+    Serial.print("gps result code=");
+    Serial.println(result);
+    Serial.println(gps_msg_buf[gps_msg_buf_current]);
+    Serial.print("new_time_fix=");
+    Serial.println(gps.new_time_fix());
+    Serial.print("last_time_fix=");
+    Serial.println(gps.last_time_fix());
+    unsigned long chars;
+    unsigned short sentences, failed;
+    gps.stats(&chars, &sentences, &failed);
+    Serial.print(" CHARS=");
+    Serial.print(chars);
+    Serial.print(" SENTENCES=");
+    Serial.print(sentences);
+    Serial.print(" CSUM ERR=");
+    Serial.println(failed);
+  }
+#endif
 }
 
 //bool gps_active = false;
@@ -2396,7 +2492,7 @@ void update_GPS(void) {
 
 // Emit SQWV on LED pin.
 #ifdef MY_PICO_RP2040
-#define SQWV_PIN_RP2040 25  // On-board LED on Pico, run in parallel.
+  #define SQWV_PIN_RP2040 25  // On-board LED on Pico, run in parallel.
 #endif
 #define SQWV_PIN 13
 
@@ -2452,335 +2548,335 @@ void timer_update_trim_ppb(int ppb) {
 #define EXT_10MHZ_INPUT
 
 #ifdef EXT_10MHZ_INPUT
-#warning "Using EXT_10MHZ_INPUT"
+  #warning "Using EXT_10MHZ_INPUT"
 
-#ifdef ARDUINO_ARCH_RP2040
-// PPS ticks come from external 10MHz input to RP2040 (i.e., OCXO)
-// Use the PWM counter as an external-input counter.
+  #ifdef ARDUINO_ARCH_RP2040
+  // PPS ticks come from external 10MHz input to RP2040 (i.e., OCXO)
+  // Use the PWM counter as an external-input counter.
 
-#include "hardware/irq.h"
-#include "hardware/pwm.h"
+  #include "hardware/irq.h"
+  #include "hardware/pwm.h"
 
-const char *clock_name = "10M";
+  const char *clock_name = "10M";
 
-// Where the frequency to count is coming in.
-// On RP2040, must be odd-numbered (PWM Chan B) pin to use PWM freq counter.
-#ifdef MY_PICO_RP2040
-int timer_tenMHzInputPin = 7;  // MUST BE ODD for RP2040
-#warning "10MHz input on GP7"
-#else  // FEATHER_RP2040
-int timer_tenMHzInputPin = 11;  // MUST BE ODD for RP2040
-#warning "10MHz input on GP11"
-#endif
+  // Where the frequency to count is coming in.
+  // On RP2040, must be odd-numbered (PWM Chan B) pin to use PWM freq counter.
+  #ifdef MY_PICO_RP2040
+    int timer_tenMHzInputPin = 7;  // MUST BE ODD for RP2040
+    #warning "10MHz input on GP7"
+    #else  // FEATHER_RP2040
+    int timer_tenMHzInputPin = 11;        // MUST BE ODD for RP2040
+    #warning "10MHz input on GP11"
+  #endif
 
-uint8_t timer_sliceNum = 0;
+  uint8_t timer_sliceNum = 0;
 
-#ifdef SLOW_CONNOR_OCXO
-  #warning "Base clock is 2 clocks fast (for slow Connor OCXO)"
-  uint32_t timer_count_max = 9999998;  // 10 million - 2.  RP2040 Pico + Connor OCXO is 250 ppb slow
-#else
-  uint32_t timer_count_max = 10000000;  // 10 million
-#endif
-volatile uint32_t timer_count_max_this_time = 0;
-volatile uint32_t timer_count = 0;
-const uint32_t timer_default_pwmTop = (1L << 16);
-volatile uint32_t timer_pwmTop = timer_default_pwmTop;
+  #ifdef SLOW_CONNOR_OCXO
+    #warning "Base clock is 2 clocks fast (for slow Connor OCXO)"
+    uint32_t timer_count_max = 9999998;  // 10 million - 2.  RP2040 Pico + Connor OCXO is 250 ppb slow
+  #else
+    uint32_t timer_count_max = 10000000;  // 10 million
+  #endif
+  volatile uint32_t timer_count_max_this_time = 0;
+  volatile uint32_t timer_count = 0;
+  const uint32_t timer_default_pwmTop = (1L << 16);
+  volatile uint32_t timer_pwmTop = timer_default_pwmTop;
 
-void one_sec_callback() {
-  // Make the callback to the RTC simulator.
-  clock_tick();
-  // Setup for next alarm, including cumulated nanos.
-  timer_count -= timer_count_max_this_time;  // Should give zero.
-  // Figure fine-tuning.
-  cumulated_nanos += nanosecs_per_sec_trim;
-  int centinanos_offset = cumulated_nanos / 100;
-  cumulated_nanos -= centinanos_offset * 100;
-  timer_count_max_this_time = timer_count_max + centinanos_offset;
-  // Return to full-scale wrapping.
-  timer_pwmTop = timer_default_pwmTop;
-  pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
-}
-
-void timer_on_pwm_wrap() {
-  // Clear the interrupt flag that brought us here
-  // Wind on the underlying counter.
-  pwm_clear_irq(timer_sliceNum);
-  timer_count += timer_pwmTop;
-
-  if (timer_count >= timer_count_max_this_time) {
-    one_sec_callback();
-  } else if ((timer_count_max_this_time - timer_count) < timer_default_pwmTop) {
-    // Adjust top for last ramp.
-    timer_pwmTop = (timer_count_max_this_time - timer_count);
+  void one_sec_callback() {
+    // Make the callback to the RTC simulator.
+    clock_tick();
+    // Setup for next alarm, including cumulated nanos.
+    timer_count -= timer_count_max_this_time;  // Should give zero.
+    // Figure fine-tuning.
+    cumulated_nanos += nanosecs_per_sec_trim;
+    int centinanos_offset = cumulated_nanos / 100;
+    cumulated_nanos -= centinanos_offset * 100;
+    timer_count_max_this_time = timer_count_max + centinanos_offset;
+    // Return to full-scale wrapping.
+    timer_pwmTop = timer_default_pwmTop;
     pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
   }
-}
 
-void timer_setup_pwm_counter(uint8_t freq_pin) {
-  // Configure the PWM circuit to count pulses on freq_pin.
-  // Only the PWM B pins can be used as inputs.
-  assert(pwm_gpio_to_channel(freq_pin) == PWM_CHAN_B);
-  timer_sliceNum = pwm_gpio_to_slice_num(freq_pin);
+  void timer_on_pwm_wrap() {
+    // Clear the interrupt flag that brought us here
+    // Wind on the underlying counter.
+    pwm_clear_irq(timer_sliceNum);
+    timer_count += timer_pwmTop;
 
-  // Count once for every rising edge on PWM B input
-  pwm_config cfg = pwm_get_default_config();
-  pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_B_RISING);
-  pwm_config_set_clkdiv(&cfg, 1);
-  pwm_init(timer_sliceNum, &cfg, false);
-  gpio_set_function(freq_pin, GPIO_FUNC_PWM);
-  pwm_set_enabled(timer_sliceNum, true);
-  pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
-  timer_count_max_this_time = timer_count_max;
+    if (timer_count >= timer_count_max_this_time) {
+      one_sec_callback();
+    } else if ((timer_count_max_this_time - timer_count) < timer_default_pwmTop) {
+      // Adjust top for last ramp.
+      timer_pwmTop = (timer_count_max_this_time - timer_count);
+      pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+    }
+  }
 
-  // Setup the wraparound interrupt.
-  // Mask our slice's IRQ output into the PWM block's single interrupt line,
-  // and register our interrupt handler
-  pwm_clear_irq(timer_sliceNum);
-  pwm_set_irq_enabled(timer_sliceNum, true);
-  irq_set_exclusive_handler(PWM_IRQ_WRAP, timer_on_pwm_wrap);
-  // PWM IRQ was losing ~2 wraps/second (~10ms) when I2C serving was active,
-  // so make PWM wrap pre-empt I2C servicing.
-  irq_set_priority(PWM_IRQ_WRAP, /* hardware_priority */ 0);  // 0=highest
-  irq_set_enabled(PWM_IRQ_WRAP, true);
-}
+  void timer_setup_pwm_counter(uint8_t freq_pin) {
+    // Configure the PWM circuit to count pulses on freq_pin.
+    // Only the PWM B pins can be used as inputs.
+    assert(pwm_gpio_to_channel(freq_pin) == PWM_CHAN_B);
+    timer_sliceNum = pwm_gpio_to_slice_num(freq_pin);
 
-void timer_setup(void) {
-  // Setup regular timer interrupt.
-  timer_setup_pwm_counter(timer_tenMHzInputPin);
-}
+    // Count once for every rising edge on PWM B input
+    pwm_config cfg = pwm_get_default_config();
+    pwm_config_set_clkdiv_mode(&cfg, PWM_DIV_B_RISING);
+    pwm_config_set_clkdiv(&cfg, 1);
+    pwm_init(timer_sliceNum, &cfg, false);
+    gpio_set_function(freq_pin, GPIO_FUNC_PWM);
+    pwm_set_enabled(timer_sliceNum, true);
+    pwm_set_wrap(timer_sliceNum, timer_pwmTop - 1);
+    timer_count_max_this_time = timer_count_max;
 
-void timer_reset_sync(void) {
-  // Clear the count to zero, restart the PWM counter too.
-  timer_count = 0;
-  pwm_set_counter(timer_sliceNum, 0);
-}
+    // Setup the wraparound interrupt.
+    // Mask our slice's IRQ output into the PWM block's single interrupt line,
+    // and register our interrupt handler
+    pwm_clear_irq(timer_sliceNum);
+    pwm_set_irq_enabled(timer_sliceNum, true);
+    irq_set_exclusive_handler(PWM_IRQ_WRAP, timer_on_pwm_wrap);
+    // PWM IRQ was losing ~2 wraps/second (~10ms) when I2C serving was active,
+    // so make PWM wrap pre-empt I2C servicing.
+    irq_set_priority(PWM_IRQ_WRAP, /* hardware_priority */ 0);  // 0=highest
+    irq_set_enabled(PWM_IRQ_WRAP, true);
+  }
+
+  void timer_setup(void) {
+    // Setup regular timer interrupt.
+    timer_setup_pwm_counter(timer_tenMHzInputPin);
+  }
+
+  void timer_reset_sync(void) {
+    // Clear the count to zero, restart the PWM counter too.
+    timer_count = 0;
+    pwm_set_counter(timer_sliceNum, 0);
+  }
 
 #else  // !RP2040 - use ESP32 PCNT
 
-#ifdef ESP32
+  #ifdef ESP32
 
-// ESP32_FreqCount
-// from https://github.com/kapraran/FreqCountESP/blob/master/src/FreqCountESP.cpp
-extern "C" {
-#include "soc/pcnt_struct.h"
-}
-#include <driver/pcnt.h>
+    // ESP32_FreqCount
+    // from https://github.com/kapraran/FreqCountESP/blob/master/src/FreqCountESP.cpp
+    extern "C" {
+    #include "soc/pcnt_struct.h"
+    }
+    #include <driver/pcnt.h>
 
-volatile uint32_t sLastPcnt = 0;
+    volatile uint32_t sLastPcnt = 0;
 
-//#define PCNT_HIGH_LIMIT 32767  // largest +ve value for int16_t.
-#define PCNT_HIGH_LIMIT 25000  // largest +ve value for int16_t.
-#define PCNT_LOW_LIMIT 0
+    //#define PCNT_HIGH_LIMIT 32767  // largest +ve value for int16_t.
+    #define PCNT_HIGH_LIMIT 25000  // largest +ve value for int16_t.
+    #define PCNT_LOW_LIMIT 0
 
-#define PCNT_UNIT PCNT_UNIT_0
-#define PCNT_CHANNEL PCNT_CHANNEL_0
+    #define PCNT_UNIT PCNT_UNIT_0
+    #define PCNT_CHANNEL PCNT_CHANNEL_0
 
-uint32_t timer_count_max = 10000000;  // 10 million
-volatile uint32_t timer_count_max_this_time = 0;
-volatile uint32_t timer_count = 0;
-volatile uint32_t timer_pwmTop = PCNT_HIGH_LIMIT;
+    uint32_t timer_count_max = 10000000;  // 10 million
+    volatile uint32_t timer_count_max_this_time = 0;
+    volatile uint32_t timer_count = 0;
+    volatile uint32_t timer_pwmTop = PCNT_HIGH_LIMIT;
 
 
-void pcnt_set_hilimit(int val) {
-  //pcnt_config_t unit_config = {
-  //  .high_limit = val,
-  //  .low_limit = 0,
-  //};
-  //pcnt_unit_handle_t pcnt_unit = NULL;
-  //pcnt_unit_config(&unit_config, &pcnt_unit);
-}
+    void pcnt_set_hilimit(int val) {
+      //pcnt_config_t unit_config = {
+      //  .high_limit = val,
+      //  .low_limit = 0,
+      //};
+      //pcnt_unit_handle_t pcnt_unit = NULL;
+      //pcnt_unit_config(&unit_config, &pcnt_unit);
+    }
 
-void one_sec_callback() {
-  // Make the callback to the RTC simulator.
-  clock_tick();
-  // Setup for next alarm, including cumulated nanos.
-  timer_count -= timer_count_max_this_time;  // Should give zero.
-  // Figure fine-tuning.
-  cumulated_nanos += nanosecs_per_sec_trim;
-  int centinanos_offset = cumulated_nanos / 100;
-  cumulated_nanos -= centinanos_offset * 100;
-  timer_count_max_this_time = timer_count_max + centinanos_offset;
-  // Return to full-scale wrapping.
-  timer_pwmTop = PCNT_HIGH_LIMIT;
-  pcnt_set_hilimit(timer_pwmTop - 1);
-}
+    void one_sec_callback() {
+      // Make the callback to the RTC simulator.
+      clock_tick();
+      // Setup for next alarm, including cumulated nanos.
+      timer_count -= timer_count_max_this_time;  // Should give zero.
+      // Figure fine-tuning.
+      cumulated_nanos += nanosecs_per_sec_trim;
+      int centinanos_offset = cumulated_nanos / 100;
+      cumulated_nanos -= centinanos_offset * 100;
+      timer_count_max_this_time = timer_count_max + centinanos_offset;
+      // Return to full-scale wrapping.
+      timer_pwmTop = PCNT_HIGH_LIMIT;
+      pcnt_set_hilimit(timer_pwmTop - 1);
+    }
 
-portMUX_TYPE pcntMux = portMUX_INITIALIZER_UNLOCKED;
+    portMUX_TYPE pcntMux = portMUX_INITIALIZER_UNLOCKED;
 
-static void IRAM_ATTR onHLim(void *backupCounter) {
-  // 16 bit pulse counter hit high limit; increment the 32 bit backup.
-  portENTER_CRITICAL_ISR(&pcntMux);
-  PCNT.int_clr.val = BIT(PCNT_UNIT);  // Clear the interrupt.
-  timer_count += timer_pwmTop;
-  if (timer_count >= timer_count_max_this_time) {
-    one_sec_callback();
-  } else if ((timer_count_max_this_time - timer_count) < PCNT_HIGH_LIMIT) {
-    // Adjust top for last ramp.
-    timer_pwmTop = (timer_count_max_this_time - timer_count);
-    pcnt_set_hilimit(timer_pwmTop - 1);
-  }
-  portEXIT_CRITICAL_ISR(&pcntMux);
-}
+    static void IRAM_ATTR onHLim(void *backupCounter) {
+      // 16 bit pulse counter hit high limit; increment the 32 bit backup.
+      portENTER_CRITICAL_ISR(&pcntMux);
+      PCNT.int_clr.val = BIT(PCNT_UNIT);  // Clear the interrupt.
+      timer_count += timer_pwmTop;
+      if (timer_count >= timer_count_max_this_time) {
+        one_sec_callback();
+      } else if ((timer_count_max_this_time - timer_count) < PCNT_HIGH_LIMIT) {
+        // Adjust top for last ramp.
+        timer_pwmTop = (timer_count_max_this_time - timer_count);
+        pcnt_set_hilimit(timer_pwmTop - 1);
+      }
+      portEXIT_CRITICAL_ISR(&pcntMux);
+    }
 
-const char *clock_name = "10M";
+    const char *clock_name = "10M";
 
-// Where the frequency to count is coming in.
-int timer_tenMHzInputPin = 10;  // GP10 on ESP32
-#warning "10MHz input on D10"
+    // Where the frequency to count is coming in.
+    int timer_tenMHzInputPin = 10;  // GP10 on ESP32
+    #warning "10MHz input on D10"
 
-static void setupPcnt(uint8_t pin) {
-  pcnt_config_t pcntConfig = {
-    .pulse_gpio_num = pin,
-    .ctrl_gpio_num = -1,
-    .pos_mode = PCNT_CHANNEL_EDGE_ACTION_INCREASE,
-    .neg_mode = PCNT_CHANNEL_EDGE_ACTION_HOLD,
-    .counter_h_lim = PCNT_HIGH_LIMIT,
-    .counter_l_lim = PCNT_LOW_LIMIT,
-    .unit = PCNT_UNIT,
-    .channel = PCNT_CHANNEL,
-  };
-  pcnt_unit_config(&pcntConfig);
-  pcnt_counter_pause(PCNT_UNIT);
-  pcnt_counter_clear(PCNT_UNIT);
-  pcnt_event_enable(PCNT_UNIT, PCNT_EVT_H_LIM);  // Interrupt on high limit.
-  pcnt_isr_handle_t isrHandle;
-  pcnt_isr_register(onHLim, NULL, 0, &isrHandle);
-  pcnt_intr_enable(PCNT_UNIT);
-  pcnt_counter_resume(PCNT_UNIT);
-}
+    static void setupPcnt(uint8_t pin) {
+      pcnt_config_t pcntConfig = {
+        .pulse_gpio_num = pin,
+        .ctrl_gpio_num = -1,
+        .pos_mode = PCNT_CHANNEL_EDGE_ACTION_INCREASE,
+        .neg_mode = PCNT_CHANNEL_EDGE_ACTION_HOLD,
+        .counter_h_lim = PCNT_HIGH_LIMIT,
+        .counter_l_lim = PCNT_LOW_LIMIT,
+        .unit = PCNT_UNIT,
+        .channel = PCNT_CHANNEL,
+      };
+      pcnt_unit_config(&pcntConfig);
+      pcnt_counter_pause(PCNT_UNIT);
+      pcnt_counter_clear(PCNT_UNIT);
+      pcnt_event_enable(PCNT_UNIT, PCNT_EVT_H_LIM);  // Interrupt on high limit.
+      pcnt_isr_handle_t isrHandle;
+      pcnt_isr_register(onHLim, NULL, 0, &isrHandle);
+      pcnt_intr_enable(PCNT_UNIT);
+      pcnt_counter_resume(PCNT_UNIT);
+    }
 
-void timer_setup(void) {
-  // Configure counting on frequency input pin.
-  // Setup regular timer interrupt.
-  setupPcnt(timer_tenMHzInputPin);
-}
+    void timer_setup(void) {
+      // Configure counting on frequency input pin.
+      // Setup regular timer interrupt.
+      setupPcnt(timer_tenMHzInputPin);
+    }
 
-void timer_reset_sync(void) {
-  // Happens e.g. when seconds register is written.  Make seconds happen relative to now.
-  pcnt_counter_pause(PCNT_UNIT);
-  timer_count = 0;
-  pcnt_counter_clear(PCNT_UNIT);
-  pcnt_counter_resume(PCNT_UNIT);
-}
+    void timer_reset_sync(void) {
+      // Happens e.g. when seconds register is written.  Make seconds happen relative to now.
+      pcnt_counter_pause(PCNT_UNIT);
+      timer_count = 0;
+      pcnt_counter_clear(PCNT_UNIT);
+      pcnt_counter_resume(PCNT_UNIT);
+    }
 
-#endif  // ESP32
-#endif  // !RP2040
+    #endif  // ESP32
+  #endif  // !RP2040
 
 #else  // internal clocking.
 
-#ifdef ARDUINO_ARCH_RP2040
-const char *clock_name = "RP2";
+  #ifdef ARDUINO_ARCH_RP2040
+  const char *clock_name = "RP2";
 
-static bool _repeating_timer_callback(struct repeating_timer *t) {
-  clock_tick();
-  cumulated_nanos += nanosecs_per_sec_trim;
-  int micros_offset = cumulated_nanos / 1000;
-  cumulated_nanos -= micros_offset * 1000;
-  //timerAlarmWrite(timer, tick_period_us + micros_offset, true);
-  return true;
-}
+  static bool _repeating_timer_callback(struct repeating_timer *t) {
+    clock_tick();
+    cumulated_nanos += nanosecs_per_sec_trim;
+    int micros_offset = cumulated_nanos / 1000;
+    cumulated_nanos -= micros_offset * 1000;
+    //timerAlarmWrite(timer, tick_period_us + micros_offset, true);
+    return true;
+  }
 
-// Should probably use a succession of add_alarm_at to get variable timing.
-struct repeating_timer mTimer;
+  // Should probably use a succession of add_alarm_at to get variable timing.
+  struct repeating_timer mTimer;
 
-void timer_setup(void) {
-  // Setup regular timer interrupt.
-  // Negative period specifies (negative of) delay between successive calls,
-  // not between end of handler and next call.
-  add_repeating_timer_us(-tick_period_us, _repeating_timer_callback, NULL, &mTimer);
-}
+  void timer_setup(void) {
+    // Setup regular timer interrupt.
+    // Negative period specifies (negative of) delay between successive calls,
+    // not between end of handler and next call.
+    add_repeating_timer_us(-tick_period_us, _repeating_timer_callback, NULL, &mTimer);
+  }
 
-void timer_reset_sync(void) {
-  // Delete then restart the timer.
-  cancel_repeating_timer(&mTimer);
-  timer_setup();
-}
+  void timer_reset_sync(void) {
+    // Delete then restart the timer.
+    cancel_repeating_timer(&mTimer);
+    timer_setup();
+  }
+
+  #else  // !RP2040
+
+  #ifdef ESP32
+  // ESP32 periodic timer
+
+  #endif  // ESP32
+  #endif  // !RP2040
+
+  #endif  // !EXT_10MHZ_INPUT
+
+
+  // ----- Temperature sensor -----
+
+  #ifdef ARDUINO_ARCH_RP2040
+
+  // Read the on-chip temp sensor with ADC
+  // See
+  // https://learnembeddedsystems.co.uk/using-the-rp2040-on-board-temperature-sensor
+
+  #include "hardware/adc.h"
+
+  void temperature_setup(void) {
+    // Configure ADC
+    adc_init();
+    adc_set_temp_sensor_enabled(true);
+    adc_select_input(4);  // 5th ADC channel == temp sensor.
+  }
+
+  int temperature_get(void) {
+    // Return current temperature in quarter-Cs.
+    // Temp sensor V_be is nominally 0.706 v at 27 degC
+    // with a slope of -1.721 mV/deg.
+    // temp_quarter-Cs = 4 * (27 - ((3.3 * adc_read() / 4096) - 0.706) / 0.001721)
+    //                 = 4 * (27 - (0.468 * adc_read() - 410.22))
+    //                 = 4 * (437.22 - 0.468 * adc_read())
+    //                 =
+    //  = 108 - (13.2 / 4096 * adc_read() * 581 + 4*410
+    //  = 1748.9 - 1.872 * adc_read()
+    //  =/= 1749 - (15/8) * adc_read()
+    //float adc_volts = (3.3f * adc_read()) / (float)(1L<<12);
+    //float temperature = 27 - (adc_volts - 0.706) / 0.001721;
+    //return temperature;
+    return 1749 - ((15 * adc_read()) >> 3);
+  }
 
 #else  // !RP2040
 
-#ifdef ESP32
-// ESP32 periodic timer
+  #ifdef ESP32
+    // EPS32 onboard temp sensor
+    // See
+    // https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/temp_sensor.html
 
-#endif  // ESP32
-#endif  // !RP2040
+    //#include "driver/temperature_sensor.h"
 
-#endif  // !EXT_10MHZ_INPUT
+    void temperature_setup(void) {
+      //temperature_sensor_handle_t temp_sensor = NULL;
+      //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+      //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
+      //temperature_sensor_enable(temp_sensor);
+    }
 
+    // Copied from esp32.../esp32-hal.h, undocumented??  Returns C.
+    float temperatureRead();
 
-// ----- Temperature sensor -----
+    int temperature_get(void) {
+      // Return current temperature in quarter-Cs.
+      float tsens_value;
+      //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
+      tsens_value = temperatureRead();
+      return (int)(round(4 * tsens_value));
+    }
 
-#ifdef ARDUINO_ARCH_RP2040
+  #else  // !ESP32
 
-// Read the on-chip temp sensor with ADC
-// See
-// https://learnembeddedsystems.co.uk/using-the-rp2040-on-board-temperature-sensor
+    void temperature_setup(void) {
+      // nothing.
+    }
 
-#include "hardware/adc.h"
+    int temperature_get(void) {
+      // Return current temperature in quarter-Cs.
+      // dummy.
+      return (4 * 25);
+    }
 
-void temperature_setup(void) {
-  // Configure ADC
-  adc_init();
-  adc_set_temp_sensor_enabled(true);
-  adc_select_input(4);  // 5th ADC channel == temp sensor.
-}
-
-int temperature_get(void) {
-  // Return current temperature in quarter-Cs.
-  // Temp sensor V_be is nominally 0.706 v at 27 degC
-  // with a slope of -1.721 mV/deg.
-  // temp_quarter-Cs = 4 * (27 - ((3.3 * adc_read() / 4096) - 0.706) / 0.001721)
-  //                 = 4 * (27 - (0.468 * adc_read() - 410.22))
-  //                 = 4 * (437.22 - 0.468 * adc_read())
-  //                 =
-  //  = 108 - (13.2 / 4096 * adc_read() * 581 + 4*410
-  //  = 1748.9 - 1.872 * adc_read()
-  //  =/= 1749 - (15/8) * adc_read()
-  //float adc_volts = (3.3f * adc_read()) / (float)(1L<<12);
-  //float temperature = 27 - (adc_volts - 0.706) / 0.001721;
-  //return temperature;
-  return 1749 - ((15 * adc_read()) >> 3);
-}
-
-#else  // !RP2040
-
-#ifdef ESP32
-// EPS32 onboard temp sensor
-// See
-// https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/peripherals/temp_sensor.html
-
-//#include "driver/temperature_sensor.h"
-
-void temperature_setup(void) {
-  //temperature_sensor_handle_t temp_sensor = NULL;
-  //temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
-  //temperature_sensor_install(&temp_sensor_config, &temp_sensor);
-  //temperature_sensor_enable(temp_sensor);
-}
-
-// Copied from esp32.../esp32-hal.h, undocumented??  Returns C.
-float temperatureRead();
-
-int temperature_get(void) {
-  // Return current temperature in quarter-Cs.
-  float tsens_value;
-  //temperature_sensor_get_celsius(temp_sensor, &tsens_value);
-  tsens_value = temperatureRead();
-  return (int)(round(4 * tsens_value));
-}
-
-#else  // !ESP32
-
-void temperature_setup(void) {
-  // nothing.
-}
-
-int temperature_get(void) {
-  // Return current temperature in quarter-Cs.
-  // dummy.
-  return (4 * 25);
-}
-
-#endif  // !ESP32
+  #endif  // !ESP32
 #endif  // !RP2040
 
 // ----- DS3231 emulation -----
@@ -2813,7 +2909,8 @@ class DateTime decode_time_from_regs(uint8_t *buffer) {
 }
 
 time_t ds3231_unixtime(void) {
-  return decode_time_from_regs(registers).unixtime();
+  //return decode_time_from_regs(registers).unixtime();
+  return ds3231.now().unixtime();
 }
 
 void encode_time_to_regs(const DateTime &dt, uint8_t *buffer) {
@@ -2828,7 +2925,7 @@ void encode_time_to_regs(const DateTime &dt, uint8_t *buffer) {
   buffer[6] = bin2bcd(dt.year() - 2000U);
 }
 
-  // Initialize Aging specifically for RP2040 with Abracon OCXO
+// Initialize Aging specifically for RP2040 with Abracon OCXO
 //#define INITIAL_DS3231_AGING 18
 
 void ds3231_setup() {
@@ -2929,8 +3026,9 @@ void ds3231_delta_aging(int delta) {
     // Aging is pre-empted to modify the VCOCXO if it's there.
     dac_delta(delta);
   } else {
-    registers[DS3231_AGING] = (delta + (int8_t)registers[DS3231_AGING]);
-    registers_next[DS3231_AGING] = registers[DS3231_AGING];
+    //registers[DS3231_AGING] = (delta + (int8_t)registers[DS3231_AGING]);
+    //registers_next[DS3231_AGING] = registers[DS3231_AGING];
+    ds3231.setAging(ds3231.getAging() + delta);
   }
 }
 
@@ -3013,14 +3111,14 @@ void ds3231_registers_updated(bool seconds_modified) {
 // ------- Tick interrupt -------
 
 // Track whether we have a low pulse on sqwv that needs clearing.
-volatile uint32_t last_sqwv_millis = 0;
+//volatile uint32_t last_sqwv_millis = 0;
 // After how many ms should we return sqwv high?
 const uint32_t sqwv_pulse_ms = 500;
 
 // Detect a tick in foreground.
-volatile bool tick_happened = false;
+//volatile bool tick_happened = false;
 // Interrupt-updated micros() at last tick (to help interface with explorer).
-volatile uint32_t tick_micros = 0;
+//volatile uint32_t tick_micros = 0;
 
 void clock_tick(void) {
   // Swap the registers double-buffer.  Do this and update output pin as fast as possible.
@@ -3284,7 +3382,7 @@ void write_registers_fn(uint8_t reg, const uint8_t *buffer, uint8_t num) {
 
 #define MAXWAIT_SERIAL 1000  // 200 = 2 seconds.
 //bool serial_available = false;
-void open_serial(int baudrate = 9600) {
+void open_serial(int baudrate = 115200) {
   Serial.begin(baudrate);
   // Wait for Serial port to open
   int i = 0;
@@ -3312,18 +3410,7 @@ void setup() {
   // Internal I2C is used to communicate with I2C peripherals.
   INT_I2C.setSDA(int_sda_pin);
   INT_I2C.setSCL(int_scl_pin);
-  // External I2C is the one we act as a peripheral (DS3231) on.
-  EXT_I2C.setSDA(ext_sda_pin);
-  EXT_I2C.setSCL(ext_scl_pin);
-  EXT_I2C.begin(DS3231_ADDRESS);
-#else  // ESP32/ATmeta
-#define I2C_FREQ 100000
-  EXT_I2C.begin(DS3231_ADDRESS, ext_sda_pin, ext_scl_pin, I2C_FREQ);
 #endif
-  // Function to run when data requested from master
-  EXT_I2C.onRequest(requestEvent);
-  // Function to run when data received from master
-  EXT_I2C.onReceive(receiveEvent);
 
   // Configure SQWV output pin (typically LED).
   pinMode(SQWV_PIN, OUTPUT);
@@ -3351,15 +3438,50 @@ void setup() {
   Serial.println("about to setup_interrupts...");
   setup_interrupts();
 
-  // Setup ds3231 to use accessor functions instead of reading across I2C.
-  Serial.println("about to begin_ds3231...");
-  ds3231.begin(&read_registers_fn, &write_registers_fn);
 
-  // Emulator setup
-  Serial.println("about to ds3231_setup...");
-  ds3231_setup();
+  // RTC selection & config
   Serial.println("about to timer_setup...");
   timer_setup();
+  Serial.println("checking timer activity...");
+  delay(50);  // timer_count is incremented every 65k 10 MHz steps
+  if (timer_count == 0) {
+    // 10 MHz in is inactive, look for external RTC
+    Serial.println("about to connect to external DS3231...");
+#ifdef ARDUINO_ARCH_RP2040
+    EXT_I2C.setSDA(ext_sda_pin);
+    EXT_I2C.setSCL(ext_scl_pin);
+    EXT_I2C.begin();
+#else  // ESP32/ATmeta
+  #define I2C_FREQ 100000
+    EXT_I2C.begin(ext_sda_pin, ext_scl_pin, I2C_FREQ);
+#endif
+    ds3231.begin(&EXT_I2C);
+    // We need to poll when using external DS3231
+    //polling_interval = 10;  // ms
+    tick_from_sqwv = true;
+  } else {
+    // Setup ds3231 to use accessor functions instead of reading across I2C.
+    // Emulator setup
+    Serial.println("about to setup ds3231 emulator...");
+    ds3231_setup();
+    Serial.println("about to begin_ds3231 emulated...");
+    ds3231.begin(&read_registers_fn, &write_registers_fn);
+    Serial.println("setting up I2C secondary...");
+#ifdef ARDUINO_ARCH_RP2040
+    // Configure Pico RP2040 I2C
+    // External I2C is the one we act as a peripheral (DS3231) on.
+    EXT_I2C.setSDA(ext_sda_pin);
+    EXT_I2C.setSCL(ext_scl_pin);
+    EXT_I2C.begin(DS3231_ADDRESS);
+#else  // ESP32/ATmeta
+  #define I2C_FREQ 100000
+    EXT_I2C.begin(DS3231_ADDRESS, ext_sda_pin, ext_scl_pin, I2C_FREQ);
+#endif
+    // Function to run when data requested from master
+    EXT_I2C.onRequest(requestEvent);
+    // Function to run when data received from master
+    EXT_I2C.onReceive(receiveEvent);
+  }
   Serial.println("about to temperature_setup...");
   temperature_setup();
 
