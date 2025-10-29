@@ -438,11 +438,11 @@ void getAlarmModeTemplateString(char *s, uint8_t mode, uint8_t alarm_num) {
 }
 
 // Updated by main loop, used to display here.
-long int skew_us = 0;
-long int last_skew_us = 0;
-// Holds skew_us immediately after GPS sync.
-long int initial_skew_us = 0;
-void display_skew_us(long int skew_microseconds, int x, int y);  // forward dec.
+long int late_us = 0;
+long int last_late_us = 0;
+// Holds late_us immediately after GPS sync.
+long int initial_late_us = 0;
+void display_late_us(long int late_microseconds, int x, int y);  // forward dec.
 
 // Set when GPS syncs the time.
 time_t last_gps_sync_unixtime = 0;
@@ -477,7 +477,7 @@ bool get_ppb(long int *p_ppb_times_100, bool verbose = false) {
     return false;
   }
   long int my_secs_since_sync = secs_since_sync;
-  long int my_initial_skew_us = initial_skew_us;
+  long int my_initial_late_us = initial_late_us;
   // Maybe use the logger.
   int log_data;
   time_t log_time;
@@ -485,13 +485,13 @@ bool get_ppb(long int *p_ppb_times_100, bool verbose = false) {
   if (get_oldest_data(&log_data, &log_time)
       && log_time < (ds3231_unixtime() - 300)) {
     my_secs_since_sync = ds3231_unixtime() - log_time;
-    my_initial_skew_us = log_data;
+    my_initial_late_us = log_data;
     if (verbose) {
       Serial.print("get_ppb: using logger baseval ");
       Serial.println(log_data);
     }
   }
-  ppb_times_100 = (100000L * (skew_us - my_initial_skew_us)) / (my_secs_since_sync - settle_time_since_sync);
+  ppb_times_100 = (100000L * (late_us - my_initial_late_us)) / (my_secs_since_sync - settle_time_since_sync);
   if (verbose) {
     Serial.print("get_ppb: ppb * 100 = ");
     Serial.println(ppb_times_100);
@@ -504,7 +504,7 @@ void draw_ppb(int x, int y, bool break_line = false) {
   // Print the PPB to the current text cursor position.
   // Figure PPB
   // if long int is 32 bit, then largest value is ~2e9, so numerator will overflow
-  // when skew_us is 2e4 or 20 ms.
+  // when late_us is 2e4 or 20 ms.
   long int ppb_times_100;
   if (get_ppb(&ppb_times_100)) {
     char s[12];
@@ -550,7 +550,7 @@ void display_gps_status(int x, int y, bool include_ppb = false, bool include_ske
     display.drawLine(x * CHAR_W - 1, y * ROW_H, x * CHAR_W - 1, (y + 1) * ROW_H - 1, BLACK);
   }
   if (include_skew)
-    display_skew_us(skew_us, x, y + 1);
+    display_late_us(late_us, x, y + 1);
   if (include_ppb)
     draw_ppb(x, y + 3, /*break_line=*/true);
 }
@@ -717,42 +717,42 @@ void ds3231_display(class RTC_DS3231 &ds3231, const char *clock_name, bool displ
 // ------ Skew re: GPS display -----
 
 //bool gps_active = false;
-int delta_skew_us = 0;
+int delta_late_us = 0;
 
-void display_skew_us(long int skew_microseconds, int x, int y) {
-  //Serial.print("display_skew_us=");
-  //Serial.println(skew_microseconds);
+void display_late_us(long int late_microseconds, int x, int y) {
+  //Serial.print("display_late_us=");
+  //Serial.println(late_microseconds);
   char s[5];  // "-0.0\0"
-  long int skew_milliseconds;
-  if (skew_microseconds < 0L) {
+  long int late_milliseconds;
+  if (late_microseconds < 0L) {
     s[0] = '-';
-    skew_microseconds = -skew_microseconds;
+    late_microseconds = -late_microseconds;
   } else {
     s[0] = '+';
   }
-  if (skew_microseconds >= 9950L) {
+  if (late_microseconds >= 9950L) {
     // format as +/-123
-    skew_microseconds += 500;  // rounding
-    skew_milliseconds = skew_microseconds / 1000L;
-    if (skew_milliseconds > 999L) {
-      skew_milliseconds = 999L;
+    late_microseconds += 500;  // rounding
+    late_milliseconds = late_microseconds / 1000L;
+    if (late_milliseconds > 999L) {
+      late_milliseconds = 999L;
     }
-    itoa(skew_milliseconds, s + 1, 10);
-  } else if (skew_microseconds >= 995L) {
+    itoa(late_milliseconds, s + 1, 10);
+  } else if (late_microseconds >= 995L) {
     // format as +/-0.1
     // Round up
-    skew_microseconds += 50L;  // rounding
-    skew_milliseconds = skew_microseconds / 1000L;
-    s[1] = '0' + skew_milliseconds;
+    late_microseconds += 50L;  // rounding
+    late_milliseconds = late_microseconds / 1000L;
+    s[1] = '0' + late_milliseconds;
     s[2] = '.';
-    s[3] = '0' + ((skew_microseconds / 100L) - (10 * skew_milliseconds));
+    s[3] = '0' + ((late_microseconds / 100L) - (10 * late_milliseconds));
   } else {
     // format as +/-.99
     // Round up
-    skew_microseconds += 5L;  // rounding
+    late_microseconds += 5L;  // rounding
     s[1] = '.';
-    s[2] = '0' + (skew_microseconds / 100L);
-    s[3] = '0' + ((skew_microseconds / 10L) % 10L);
+    s[2] = '0' + (late_microseconds / 100L);
+    s[3] = '0' + ((late_microseconds / 10L) % 10L);
   }
   if (s[2] == '\0') {
     s[2] = ' ';
@@ -770,7 +770,7 @@ void display_skew_us(long int skew_microseconds, int x, int y) {
     display.print(s);
     // Add latest delta too
     s[0] = 30;  // "Up filled triangle" character.
-    itoa(delta_skew_us, s + 1, 10);
+    itoa(delta_late_us, s + 1, 10);
     display.setCursor(x * CHAR_W, (y + 1) * ROW_H);
     display.print(s);
   } else {
@@ -1105,18 +1105,20 @@ void update_dac(void) {
 // -------------------
 bool serial_available = false;
 
-const int SECS_PER_DAY = 24 * 60 * 60;
-const int LOG_DATA_LEN = SCREEN_WIDTH;                   // One value per pixel.
-const int LOG_INTERVAL_SECS = 20 * 60;                   // Seconds between each logged value. 12 min x 120 vals = 1440 mins (24 h).
-const int LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
-const int SUBDIV_SECS = 6 * 60 * 60;                     //(30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
+const time_t SECS_PER_DAY = 24 * 60 * 60;
+const time_t LOG_DATA_LEN = SCREEN_WIDTH;                   // One value per pixel.
+const time_t LOG_INTERVAL_SECS = 20 * 60;                   // Seconds between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+const time_t SUBDIV_SECS = 6 * 60 * 60;                     //(30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
+//const time_t LOG_INTERVAL_SECS = 60;                   // Seconds between each logged value. 12 min x 120 vals = 1440 mins (24 h).
+//const time_t SUBDIV_SECS = 10 * 60;                     //(30 * LOG_INTERVAL_SECS);        // Where the vertical lines occur
+const time_t LOG_MAX_TIME_PERIOD_SECS = 28 * SECS_PER_DAY;  // Make sure we roll-over correctly.
 
 int log_data[LOG_DATA_LEN];
 time_t log_times[LOG_DATA_LEN];
 int data_min = 70;
 int data_max = 75;
 
-#define INVALID_TIME (-1)
+#define INVALID_TIME ((time_t)(-1))
 
 void init_data(int init_val, time_t init_time) {
   for (int i = 0; i < LOG_DATA_LEN; ++i) {
@@ -1171,6 +1173,11 @@ bool get_oldest_data(int *pdata, time_t *ptime) {
   return false;  // No data available.
 }
 
+// Largest tolerable difference between successive logged values.  This kind of depends on the data source; 1000 (1ms) is a lot for an OCXO, but the TCXO needs more, so we update it if switching to ext DS3231.
+const int max_outlier_ocxo = 1000;
+const int max_outlier_tcxo = 10000;
+int logger_max_outlier = max_outlier_ocxo;
+
 void push_data(int new_data, time_t new_time) {
   // Move forward data
   if (serial_available) {
@@ -1178,7 +1185,7 @@ void push_data(int new_data, time_t new_time) {
     Serial.println(new_data);
   }
   // Don't log data that is more than 1000 different from last-logged data.
-  if ((log_times[LOG_DATA_LEN - 1] != INVALID_TIME) && (abs(new_data - log_data[LOG_DATA_LEN - 1]) > 1000)) {
+  if ((log_times[LOG_DATA_LEN - 1] != INVALID_TIME) && (abs(new_data - log_data[LOG_DATA_LEN - 1]) > logger_max_outlier)) {
     Serial.print("Rejecting outlier data ");
     Serial.println(new_data);
     return;
@@ -1196,9 +1203,15 @@ void push_data(int new_data, time_t new_time) {
 time_t last_log_time = 0;
 
 void update_logger(int data_val, time_t data_time) {
+  //Serial.print("update_logger: last_log_time=");
+  //Serial.print(last_log_time);
+  //Serial.print(" data_time=");
+  //Serial.print(data_time);
+  //Serial.print(" data_val=");
+  //Serial.println(data_val);
   // Defer recording first point until we're on an integral multiple of the log interval.
   if (last_log_time == 0 && (data_time % LOG_INTERVAL_SECS) != 0) return;
-  if ((data_time - last_log_time + LOG_MAX_TIME_PERIOD_SECS) % LOG_MAX_TIME_PERIOD_SECS >= LOG_INTERVAL_SECS) {
+  if (((data_time + LOG_MAX_TIME_PERIOD_SECS - last_log_time) % LOG_MAX_TIME_PERIOD_SECS) >= LOG_INTERVAL_SECS) {
     // Time to log a new value.
     last_log_time = data_time;
     // Record new temperature every minute.
@@ -1421,7 +1434,11 @@ void draw_log_output(int x, int y, int w, int h) {
   const int legend_w = 3 * MICROFONT_W;  // for legends up to 3 digits.
   uint8_t data_x = x + legend_w;
   uint8_t data_w = w - legend_w;
-  int data_scale = (h - 1) * 256 / (data_max - data_min);
+  // Bring data to display down to 8 bit range.
+  int data_range = data_max - data_min;
+  int data_scaledown_bits = 0;
+  while (data_range > 255)  {++data_scaledown_bits; data_range >>= 1;}
+  int data_scale = (h - 1) * 256 / data_range;
   uint8_t last_x;
   bool last_x_valid = false;
   uint8_t last_y = y;
@@ -1429,12 +1446,12 @@ void draw_log_output(int x, int y, int w, int h) {
   uint8_t first_x = 0;
   uint8_t first_y = 0;
   time_t first_time_secs = INVALID_TIME;
-  int last_subdiv = -1;
+  time_t last_subdiv = INVALID_TIME;
   for (int i = 0; i < LOG_DATA_LEN; ++i) {
     last_data = log_data[i];
     if (log_times[i] != INVALID_TIME) {
       time_t localtime = make_localtime(log_times[i]);
-      int new_y = y + (h - 1) - ((data_scale * (last_data - data_min)) >> 8);
+      int new_y = y + (h - 1) - ((data_scale * ((last_data - data_min) >> data_scaledown_bits)) >> 8);
       int new_x = data_x + (i * (data_w - 1) / (LOG_DATA_LEN - 1));
       if (last_x_valid) {
         display.drawLine(last_x, last_y, new_x, new_y, fgcolor);
@@ -1442,7 +1459,7 @@ void draw_log_output(int x, int y, int w, int h) {
       // Add vertical lines at multiples of SUBDIV_SECS.
       time_t subdiv = localtime / SUBDIV_SECS;
       if (subdiv != last_subdiv) {
-        if (last_subdiv >= 0) {
+        if (last_subdiv != INVALID_TIME) {
           display.drawLine(new_x, y, new_x, y + h, fgcolor);
           // Label it with 2 digits to the left.
           int vert_line_legend_x = new_x - (2 * MICROFONT_W);
@@ -1488,9 +1505,13 @@ void draw_log_output(int x, int y, int w, int h) {
   *(sprint_int(legend_str, data_max)) = '\0';
   display.setCursor(x, y + MICROFONT_H);
   display.print(legend_str);
+  display.setCursor(x, y + 2 * MICROFONT_H - 1);
+  display.print("s");
   *(sprint_int(legend_str, data_min)) = '\0';
   display.setCursor(x, y + h);
   display.print(legend_str);  // Font is 6 pixels high.
+  display.setCursor(x + 4, y + 2 * MICROFONT_H + 3);
+  display.print("f");
   //display.setTextSize(2);
 }
 
@@ -2073,8 +2094,8 @@ void handle_cmd(char cmd, char *arg) {
       }
       Serial.print("Predelay us trim=");
       Serial.println(predelay_trim_us);
-      Serial.print("skew_us=");
-      Serial.println(skew_us);
+      Serial.print("late_us=");
+      Serial.println(late_us);
       break;
 
     case 'W':
@@ -2448,7 +2469,7 @@ void setup_GPS(void) {
 void update_GPS(void) {
   if (last_gps_sync_unixtime) {
     secs_since_sync = ds3231_unixtime() - last_gps_sync_unixtime;
-    if (secs_since_sync < settle_time_since_sync) initial_skew_us = skew_us;
+    if (secs_since_sync < settle_time_since_sync) initial_late_us = late_us;
   }
   if (gps_micros != last_gps_micros) {
     last_gps_micros = gps_micros;
@@ -3459,6 +3480,7 @@ void setup() {
     // We need to poll when using external DS3231
     //polling_interval = 10;  // ms
     tick_from_sqwv = true;
+    logger_max_outlier = max_outlier_tcxo;  // Larger tolerance for outliers because values are much larger.
   } else {
     // Setup ds3231 to use accessor functions instead of reading across I2C.
     // Emulator setup
@@ -3520,19 +3542,19 @@ void loop() {
     last_sqwv_millis = 0;  // Indicates no pulse waiting to be cleared.
     // Half way through second is also when we calculate and show the skew
     if (gps_active) {
-      // POSITIVE skew_us means XO tick is LATE relative to GPS; if it's getting LATER, XO needs to get FASTER to fix.
-      skew_us = (long int)(tick_micros - gps_micros);
-      //display_skew_us(skew_us);
-      // Every 100 ticks, report skew_us to serial, to track drift
+      // POSITIVE late_us means XO tick is LATE relative to GPS; if it's getting LATER, XO needs to get FASTER to fix.
+      late_us = (long int)(tick_micros - gps_micros);
+      //display_late_us(late_us);
+      // Every 100 ticks, report late_us to serial, to track drift
       if (raw_tick_count % 100 == 0) {
-        delta_skew_us = skew_us - last_skew_us;
-        last_skew_us = skew_us;
+        delta_late_us = late_us - last_late_us;
+        last_late_us = late_us;
         Serial.print("raw_tick_count=");
         Serial.print(raw_tick_count);
-        Serial.print(" skew_us=");
-        Serial.print(skew_us);
-        Serial.print(" delta skew_us=");
-        Serial.println(delta_skew_us);
+        Serial.print(" late_us=");
+        Serial.print(late_us);
+        Serial.print(" delta late_us=");
+        Serial.println(delta_late_us);
       }
     }
   }
@@ -3561,9 +3583,10 @@ void loop() {
     if (now_sec != last_sec) {
       last_sec = now_sec;
       //update_display(dt);
-      //Serial.print("tick - gps=");
-      //Serial.println((long int)(tick_micros - gps_micros));
-      update_logger(skew_us, dt.unixtime());
+      //serial_print_time(dt);
+      //Serial.print("late_us=");
+      //Serial.println(late_us);
+      update_logger(late_us, dt.unixtime());
       if (display_on)
         update_display();
     }
