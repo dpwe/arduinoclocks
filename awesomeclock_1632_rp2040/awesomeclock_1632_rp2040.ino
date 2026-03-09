@@ -1,33 +1,19 @@
-// awesomeclock_1632_atmega
+// awesomeclock_1632_rp2040
 //
 // Clock for 16x24 LED matrix using HT1632 driver
 // and DS3231 (programmed to UTC) for time.
 //
-// This version is setup to use a regular Arduino (not an ATTiny).
+// This version is setup to use an RP2040 Pico (using the Philhower Arduino core).
 
-// ---- NOTE TO FUTURE ME ----
-// I had to reflash this on 2026-03-08 because there was a once-in-7-years DST bug
-// The display thing didn't work right, all scrambled.  
-// Aruino/library/old_HT1632/ had been fiddled with.
-// I had to re-include <avr/pgmspace.c> and disable the un-definining of PROGMEM so the font 
-// really was in PROGMEM.
-// I had to #define ADAFRUIT_DISPLAY in HT1632.cpp.
-// I had to set _rotation = 0 in the first HT1632LEDMatrix constructor.
+// Wiring for 16x24 LED matrix connected to Pico 
+#define CS   6  // Green
+#define DATA 8  // Blue
+#define WR   9  // Yellow
 
-// Also the Boarduino programs via the FTDI USB cable. Board type is "Arduino Duomilenov or Diecimilia"
-// Programmer is USBTinyISP
-// https://learn.adafruit.com/boarduino-kits/use-it
-
-// Wiring for 16x24 LED matrix connected to ATMEGA328P board 
-// (Adafruit Boarduino + FTDI cable; Program as "Duemillenova with 328P")
-#define DATA 3  // Orange
-#define CS   5  // White
-#define WR   4  // Yellow
-
-// Chronodot I2C
-// SDA -> A4  (Blue)
-// SCL -> A5  (Yellow)
-// SQWV -> D2 (Green; not actually used in this script because ATTiny can't use it.)
+// DS3231 breakout - Default Pico Wire
+// SDA -> GPIO4  (Blue)
+// SCL -> GPIO5  (Yellow)
+// SQWV ->  -  (not used in this script)
 
 #define HT1632_NUMBERS_ONLY  // Actually have to set directly in HT1632.cpp.
 #include "HT1632.h"
@@ -42,7 +28,7 @@ HT1632LEDMatrix matrix = HT1632LEDMatrix(DATA, WR, CS);
 
 // Super-minimal DS3231 interface, from http://www.RinkyDinkElectronics.com/
 
-typedef uint32_t time_t;
+//typedef uint32_t time_t;
 
 class Time
 {
@@ -355,7 +341,7 @@ void matrix_update(uint8_t hour, uint8_t min, uint8_t sec) {
 
 // Config for backlight day/night mode.
 const int light_low = 0;
-const int light_high = 15;
+const int light_high = 1;
 const int hour_up = 7;
 const int hour_down = 22;
 
