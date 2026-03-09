@@ -56,7 +56,7 @@ void calc_timechange_days(int year) {
   // Jan 1st 2000 was a Saturday.  So what day is March 1st this year? 0 = Sun.
   year -= 2000;
   uint8_t march_first_dow = (6 + 365L * year + ((year + 4) / 4) + 31 + 28) % 7;
-  uint8_t second_sunday_date = 14 - ((march_first_dow - 1) % 7);
+  uint8_t second_sunday_date = 14 - ((march_first_dow + 6) % 7);  // Sunday March 1st fix.
   dst_start_day = 31 + 28 + ((year % 4) == 0) + second_sunday_date - 1;
   // March and November are 245 days == 35.0 weeks apart, so 1st sunday in Nov is the same DOW
   dst_end_day = dst_start_day + 245 - 7;  // 1st sunday, not 2nd.
