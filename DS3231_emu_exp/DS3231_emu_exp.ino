@@ -110,7 +110,7 @@
 #ifdef ARDUINO_ARCH_RP2040
   #ifdef PIN_NEOPIXEL  // i.e., this is a Feather RP2040
     #define FEATHER_RP2040
-    //#define YELLOWGREEN_LCD
+    #define YELLOWGREEN_LCD
     #ifdef YELLOWGREEN_LCD
       #define DISPLAY_ST7920  // {128,192}x64 green-yellow LCD matrix
       #define SCREEN_WIDTH 192
@@ -1567,7 +1567,7 @@ void calc_timechange_days(int year) {
   // Jan 1st 2000 was a Saturday.  So what day is March 1st this year? 0 = Sun.
   year -= 2000;
   uint8_t march_first_dow = (6 + 365L * year + ((year + 4) / 4) + 31 + 28) % 7;
-  uint8_t second_sunday_date = 14 - ((march_first_dow - 1) % 7);
+  uint8_t second_sunday_date = 14 - ((march_first_dow + 6) % 7);  // (0 - 1) % 7 is -1, so we add 6 instead.
   dst_start_day = 31 + 28 + ((year % 4) == 0) + second_sunday_date - 1;
   // March and November are 245 days == 35.0 weeks apart, so 1st sunday in Nov is the same DOW
   dst_end_day = dst_start_day + 245 - 7;  // 1st sunday, not 2nd.
@@ -2227,7 +2227,7 @@ volatile uint32_t last_sqwv_millis = 0;
       gps_micros = now_micros;
       gpio_acknowledge_irq(ppsPin, IO_IRQ_BANK0);
     }
-    if (gpio_get_irq_event_mask(rtc_sqwv_pps)) {
+    if (gpio_get_irq_event_mask(sqwvPin)) {
       sqwv_micros = now_micros;
       if (tick_from_sqwv) {
         // ext SQWV also sets the internal tick time.
