@@ -1,0 +1,4 @@
+// Copy this file to auth.h and fill in your WiFi details.
+// auth.h is in .gitignore so your credentials stay out of git.
+const char* ssid     = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
