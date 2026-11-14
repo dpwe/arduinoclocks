@@ -88,6 +88,55 @@ time_t getTeensy3Time()
   return Teensy3Clock.get();
 }
 
+// ---------------------------------
+// RTC compensation (trim), persisted in EEPROM
+// ---------------------------------
+#include <EEPROM.h>
+
+// Teensy3Clock.compensate(x) makes the clock run x*0.1192 ppm fast.
+// Default used when EEPROM holds no saved value (see history in setup()).
+const int16_t default_clock_compensate = 97;
+const int clock_compensate_limit = 2000;  // +/- 238 ppm; anything beyond is a typo.
+const int eeprom_comp_addr = 0;           // uint16 magic, then int16 value.
+const uint16_t eeprom_comp_magic = 0xC10C;
+int16_t clock_compensate = default_clock_compensate;
+
+int16_t load_clock_compensate() {
+  uint16_t magic;
+  int16_t value;
+  EEPROM.get(eeprom_comp_addr, magic);
+  EEPROM.get(eeprom_comp_addr + sizeof(magic), value);
+  if (magic != eeprom_comp_magic || abs(value) > clock_compensate_limit) {
+    return default_clock_compensate;
+  }
+  return value;
+}
+
+void save_clock_compensate(int16_t value) {
+  EEPROM.put(eeprom_comp_addr, eeprom_comp_magic);
+  EEPROM.put(eeprom_comp_addr + sizeof(eeprom_comp_magic), value);
+}
+
+void report_clock_compensate() {
+  Serial.print("clock_compensate=");
+  Serial.print(clock_compensate);
+  Serial.print(" RTC_TCR=0x");
+  Serial.println(RTC_TCR, HEX);
+}
+
+void report_rtc_tick() {
+  // Block until the next RTC seconds tick, then report the RTC's new time
+  // immediately, so the host can timestamp the line's arrival and measure the
+  // RTC offset to ~1 ms.  Freezes the display for up to 1 s.
+  rtc_tick = 0;
+  while (rtc_tick == 0) {
+  }
+  uint32_t t = Teensy3Clock.get();
+  Serial.print("Q ");
+  Serial.println(t);
+  Serial.send_now();
+}
+
 // Auto DST
 
 #include <Timezone.h>       // https://github.com/JChristensen/Timezone
@@ -127,7 +176,9 @@ char cmd_buffer[CMD_BUF_LEN];
 int cmd_len = 0;
 
 void cmd_update(void) {
-  if (Serial.available() > 0) {
+  // Drain everything available: one char per loop() (which redraws the
+  // display, ~6 ms) made a 16-char Z command land ~100 ms late.
+  while (Serial.available() > 0) {
     // read the incoming byte:
     char new_char = Serial.read();
     if (new_char == '\n') {
@@ -150,11 +201,33 @@ void cmd_update(void) {
               Serial.println(minute());
             }
             break;
-          case 'B':
+          case 'B': {
             int brightness = atoi(cmd_buffer + 1);
             set_brightness(brightness);
             Serial.print("Brightness: ");
             Serial.println(brightness);
+            break;
+          }
+          case 'Q':
+            // Report RTC time (Unix secs, UTC) right at the next seconds tick.
+            report_rtc_tick();
+            break;
+          case 'C':
+            // C - report RTC compensation; C<n> - set it (units of 0.1192 ppm
+            // fast) and save to EEPROM so it survives resets.
+            if (cmd_len > 1) {
+              int value = atoi(cmd_buffer + 1);
+              if (abs(value) > clock_compensate_limit) {
+                Serial.print("Compensation out of range +/-");
+                Serial.println(clock_compensate_limit);
+              } else {
+                clock_compensate = value;
+                Teensy3Clock.compensate(clock_compensate);
+                save_clock_compensate(clock_compensate);
+              }
+            }
+            report_clock_compensate();
+            break;
         }
       }
       cmd_len = 0;
@@ -243,10 +316,12 @@ void setup() {
   // Then, by Nov 23, 2023, it was 19 sec slow
   // in 94 days, so about -1.85 ppm, which would indicate advance 15
   // but it looks like compensate is still at 86, so maybe back to ~100?
-  const int clock_compensate = 97;
+  // Nov 14, 2026: was 2 min fast, but unclear when last set.  Drift looks
+  // seasonal (32 kHz xtal tempco), so compensation is now settable over serial
+  // with "C<n>" and saved in EEPROM; measure drift with rtc_drift.py ("Q").
+  clock_compensate = load_clock_compensate();
   Teensy3Clock.compensate(clock_compensate);
-  Serial.print("clock_compensate=");
-  Serial.println(clock_compensate);
+  report_clock_compensate();
 
   Serial.print("RTC_SR=");
   Serial.println(RTC_SR,HEX);

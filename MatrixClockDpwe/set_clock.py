@@ -62,3 +62,7 @@ os.write(fd, cmd.encode())
 print("--- sent", cmd.strip(), "(UTC) ---")
 print(read_for(4))
 os.close(fd)
+
+# Setting the clock zeroes the RTC offset, so start a new rtc_drift.py segment.
+with open(os.path.expanduser("~/.matrixclock_rtc_drift.log"), "a") as f:
+    f.write('{"t": %.3f, "event": "set"}\n' % time.time())
